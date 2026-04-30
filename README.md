@@ -1,4 +1,4 @@
-<img width="2488" height="1367" alt="Zasób 4@3x" src="https://github.com/user-attachments/assets/9ef3d39c-f11d-4f84-a96f-ec36add4ba89" />
+<img width="1376" height="768" alt="img" src="https://github.com/user-attachments/assets/b23ac377-050f-4959-a647-e9aff3b48165" />
 
 
 # Roost Runtime
