@@ -1,8 +1,11 @@
+<img width="4121" height="2010" alt="Zasób 3@3x" src="https://github.com/user-attachments/assets/240287d7-e6a7-4009-9b92-ada8c3d4af17" />
+
 # Roost Runtime
 
 Roost is a lightweight runtime for durable agent step-machines.
 
 Agent demos are easy. Long-running agent workers are not.
+
 
 The moment an agent leaves a notebook or chat session, the hard problems change:
 
