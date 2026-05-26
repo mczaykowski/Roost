@@ -32,6 +32,7 @@ roost = "roost.cli:main"
 
 [project.entry-points."roost.engines"]
 demo = "roost.engines.demo.engine:build_engine"
+watchlist = "roost.engines.watchlist.engine:build_engine"
 
 [build-system]
 requires = ["hatchling>=1.24"]
