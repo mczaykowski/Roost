@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Roost Console</title>
+    <link rel="stylesheet" href="/static/tokens.css" />
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <a class="brand" href="/" aria-label="Roost Console">
+          <img src="/assets/roost_logo_full.svg" alt="Roost" />
+        </a>
+        <nav class="nav" aria-label="Primary">
+          <button class="nav-item is-active" data-view="work">Work</button>
+          <button class="nav-item" data-view="events">Events</button>
+          <button class="nav-item" data-view="failed">Failed</button>
+        </nav>
+        <label class="search" aria-label="Search work">
+          <span class="search-mark" aria-hidden="true">
+            <svg viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <circle cx="7" cy="7" r="4.5" stroke="currentColor" stroke-width="1.5" />
+              <path d="M10.5 10.5L13.5 13.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+          </span>
+          <input id="searchInput" type="search" placeholder="Find work, engine, resource, or output" />
+        </label>
+      </header>
+
+      <main>
+        <section class="summary-card" aria-label="Console summary">
+          <div class="command-band">
+            <div>
+              <p class="eyebrow">Local Console</p>
+              <h1>Local Work</h1>
+            </div>
+            <div class="connection" id="connectionLabel">
+              <span class="connection-main">Connecting</span>
+              <span class="connection-sub">&nbsp;</span>
+            </div>
+          </div>
+
+          <section class="stats" aria-label="Work summary">
+            <article class="stat">
+              <span>Total</span>
+              <strong id="statTotal">0</strong>
+            </article>
+            <article class="stat">
+              <span>Running</span>
+              <strong id="statRunning">0</strong>
+            </article>
+            <article class="stat">
+              <span>Waiting</span>
+              <strong id="statQueued">0</strong>
+            </article>
+            <article class="stat">
+              <span>Done</span>
+              <strong id="statDone">0</strong>
+            </article>
+            <article class="stat">
+              <span>Failed</span>
+              <strong id="statFailed">0</strong>
+            </article>
+          </section>
+        </section>
+
+        <section class="panel is-visible" id="workView" aria-labelledby="workTitle">
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker"><span class="live-dot"></span>Live Work</p>
+              <h2 id="workTitle">Latest saved state</h2>
+            </div>
+            <div class="filters" aria-label="Work filters">
+              <button class="filter is-active" data-state="">All</button>
+              <button class="filter" data-state="running">Running</button>
+              <button class="filter" data-state="queued">Waiting</button>
+              <button class="filter" data-state="done">Done</button>
+              <button class="filter" data-state="failed">Failed</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>State</th>
+                  <th>Work</th>
+                  <th>Engine</th>
+                  <th>Step</th>
+                  <th>Saved</th>
+                  <th>Next</th>
+                  <th>Output</th>
+                </tr>
+              </thead>
+              <tbody id="workRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="panel" id="eventsView" aria-labelledby="eventsTitle">
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker"><span class="live-dot"></span>Events</p>
+              <h2 id="eventsTitle">Recent runtime changes</h2>
+            </div>
+          </div>
+          <div class="event-list" id="eventRows"></div>
+        </section>
+
+        <section class="panel" id="failedView" aria-labelledby="failedTitle">
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker">Needs attention</p>
+              <h2 id="failedTitle">Failed work</h2>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Work</th>
+                  <th>Engine</th>
+                  <th>Step</th>
+                  <th>Error</th>
+                </tr>
+              </thead>
+              <tbody id="failedRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <aside class="drawer" id="detailDrawer" aria-hidden="true">
+      <div class="drawer-backdrop" data-close></div>
+      <section class="drawer-panel" aria-label="Work detail">
+        <div class="drawer-head">
+          <div>
+            <p class="section-kicker">Work Detail</p>
+            <h2 id="detailTitle">No work selected</h2>
+            <div class="detail-meta" id="detailMeta"></div>
+          </div>
+          <button class="icon-button" type="button" data-close aria-label="Close detail">
+            <svg viewBox="0 0 14 14" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path d="M1.5 1.5L12.5 12.5M12.5 1.5L1.5 12.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" />
+            </svg>
+          </button>
+        </div>
+        <div class="detail-grid">
+          <article class="detail-block">
+            <h3>Payload</h3>
+            <pre id="payloadJson">{}</pre>
+          </article>
+          <article class="detail-block">
+            <h3>Latest Snapshot</h3>
+            <pre id="snapshotJson">{}</pre>
+          </article>
+          <article class="detail-block">
+            <h3>Output</h3>
+            <div id="artifactList" class="artifact-list"></div>
+          </article>
+        </div>
+      </section>
+    </aside>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
