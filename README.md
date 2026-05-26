@@ -1,12 +1,10 @@
-<img width="1376" height="768" alt="img" src="https://github.com/user-attachments/assets/b23ac377-050f-4959-a647-e9aff3b48165" />
-
-
 # Roost Runtime
 
-Roost is a lightweight runtime for durable agent step-machines.
+Roost is a tiny Redis-backed runtime for long-running agent workers: persist a
+snapshot after every step, lease work to one worker at a time, and resume safely
+after crashes.
 
 Agent demos are easy. Long-running agent workers are not.
-
 
 The moment an agent leaves a notebook or chat session, the hard problems change:
 
@@ -20,60 +18,30 @@ The moment an agent leaves a notebook or chat session, the hard problems change:
 
 Roost exists for that layer.
 
+```text
+Queue
+  -> acquire lease
+  -> load latest Snapshot
+  -> Engine.step(snapshot, item)
+  -> compare-and-swap save Snapshot
+  -> re-enqueue or mark done
+```
+
 Bring your own engine. Roost handles the operational substrate: work items,
 snapshots, leases, retries, resource claims, delayed continuation, artifacts,
 status indexes, events, and dead-letter recovery.
 
-```python
-class Engine:
-    engine_id: str
+Roost does not help an agent think. Roost helps an agent keep going.
 
-    async def init_snapshot(self, item: WorkItem) -> Snapshot: ...
-    async def step(self, snapshot: Snapshot, item: WorkItem) -> Snapshot: ...
-```
+## Quickstart
 
-Engines own domain-specific transitions. The runtime owns durability.
-
-## Why
-
-Roost is for systems where work may take minutes or days, workers may disappear,
-multiple agents may compete for the same resources, and every step needs to be
-inspectable and recoverable.
-
-It is intentionally small. You do not need to adopt a prompt framework, graph DSL,
-model router, hosted control plane, or heavyweight workflow platform. Implement
-two methods, run a worker, and let the runtime persist progress between steps.
-
-## How It Differs
-
-Roost is not a replacement for LangChain, LlamaIndex, CrewAI, AutoGen, Temporal,
-Celery, or your own agent loop. It sits at a different layer.
-
-| Tool category | Great for | Roost's difference |
-| --- | --- | --- |
-| LangChain-style frameworks | prompts, tools, retrieval, chains, agent composition | Roost does not prescribe cognition. It runs any engine as a durable step-machine. |
-| Temporal-style workflow engines | general distributed workflows with strong orchestration semantics | Roost is much smaller and agent-shaped: snapshots, resources, artifacts, and resumable engine steps without a workflow DSL. |
-| Celery-style queues | fire-and-forget background jobs | Roost persists progress after every step, renews leases, recovers orphaned work, and exposes agent state. |
-| Cron/scripts | simple repeated automation | Roost gives long-running work identity, retry state, locks, events, DLQ, and inspection. |
-
-The short version:
-
-```text
-LangChain helps decide what an agent should do.
-Temporal helps coordinate workflows.
-Celery runs jobs.
-Roost keeps long-running agents alive, inspectable, and resumable.
-```
-
-## Install
+Install dependencies:
 
 ```bash
 uv sync --extra redis --extra dev
 ```
 
-## Quickstart
-
-Start Redis locally:
+Start Redis:
 
 ```bash
 docker run --rm -p 6379:6379 redis:7
@@ -82,47 +50,96 @@ docker run --rm -p 6379:6379 redis:7
 In one terminal, run a worker:
 
 ```bash
-uv run roost worker --engines demo
+uv run roost worker --engines watchlist
 ```
 
-In another terminal, enqueue demo work:
+In another terminal, enqueue a watchlist job:
 
 ```bash
 WORK_ID=$(uv run roost enqueue \
-  --engine demo \
-  --payload '{"message":"hello durable world","count_to":3}')
+  --engine watchlist \
+  --resource domain:example.com \
+  --payload '{"url":"https://example.com","claim":"Example Domain is reachable","checks_required":3,"delay_seconds":5}')
 
 uv run roost status "$WORK_ID"
+```
+
+The final status includes a JSON artifact id. To print the evidence report:
+
+```bash
+uv run roost artifact-show <artifact_id> --ext json
+```
+
+Now kill the worker with `Ctrl-C`, wait a moment, and start it again:
+
+```bash
+uv run roost worker --engines watchlist
+uv run roost status "$WORK_ID"
+```
+
+The watchlist engine fetches the URL once per runtime step, records an
+observation in the durable snapshot, waits between checks, and writes a final
+JSON evidence report artifact. Because Roost saves a snapshot after each step,
+the restarted worker resumes from the latest persisted observation instead of
+starting over.
+
+Inspect recent runtime events:
+
+```bash
 uv run roost events
 ```
 
-The demo engine increments one counter per runtime step. Stop the worker between
-steps and start it again; progress resumes from the latest saved snapshot.
+The final `status` output includes the persisted observations and artifact
+metadata. Abridged:
 
-## Runtime Shape
-
-```text
-WorkItem
-  -> Engine.init_snapshot()
-  -> Snapshot persisted
-  -> Engine.step(snapshot)
-  -> Snapshot persisted
-  -> re-enqueue until done
+```json
+{
+  "meta": {"state": "done", "step": "done"},
+  "snapshot": {
+    "version": 4,
+    "data": {
+      "checks_completed": 3,
+      "verdict": "reachable",
+      "observations": [
+        {"ok": true, "status": 200, "url": "https://example.com"}
+      ]
+    },
+    "artifacts": [
+      {
+        "kind": "json",
+        "artifact_id": "59212cee...",
+        "metadata": {"verdict": "reachable", "checks_completed": 3}
+      }
+    ]
+  }
+}
 ```
 
-The runtime owns the queue, leases, retries, resource claims, status metadata,
-events, and recovery loop. The engine owns the state transition.
+No LLM key is required. The point of the demo is the runtime behavior: durable
+state, leases, delayed continuation, resource claims, inspection, and artifacts.
 
-## Core Primitives
+To run the full local e2e, including worker restart and final artifact printing:
 
-- `WorkItem`: durable unit of work.
-- `Snapshot`: replayable engine state after each step.
-- `Lease`: time-bound worker ownership.
-- `Artifact`: content-addressed output produced by an engine.
-- `Engine`: small async contract for pluggable execution.
-- `RedisSwarm`: Redis + SAQ backed scheduler, lease manager, retry loop, and recovery path.
+```bash
+scripts/e2e_watchlist.sh
+```
 
-## Build An Engine
+## Engine Contract
+
+Engines own domain-specific state transitions. The runtime owns durability.
+
+```python
+from roost.runtime.models import Snapshot, WorkItem
+
+
+class Engine:
+    engine_id: str
+
+    async def init_snapshot(self, item: WorkItem) -> Snapshot: ...
+    async def step(self, snapshot: Snapshot, item: WorkItem) -> Snapshot: ...
+```
+
+A minimal engine:
 
 ```python
 from roost.runtime.models import Snapshot, WorkItem
@@ -164,11 +181,18 @@ uv run roost worker --engines my-engine
 uv run roost enqueue --engine my-engine --payload '{"task":"ship it"}'
 ```
 
-## Runtime Guarantees
+## What Roost Provides
 
-Roost uses at-least-once execution. Engines should make each `step()` safe to retry
-from the same snapshot. The runtime provides:
+- `WorkItem`: durable unit of work.
+- `Snapshot`: replayable engine state after each step.
+- `Lease`: time-bound worker ownership.
+- `Artifact`: content-addressed output produced by an engine.
+- `Engine`: small async contract for pluggable execution.
+- `RedisSwarm`: Redis + SAQ backed scheduler, lease manager, retry loop, and recovery path.
 
+Runtime guarantees:
+
+- at-least-once execution
 - optimistic snapshot persistence
 - per-work leases with renewal
 - optional resource locks
@@ -177,15 +201,20 @@ from the same snapshot. The runtime provides:
 - status metadata and event stream
 - bounded retries and dead-letter queue
 
+Engines should make `step()` safe to retry from the same snapshot. Roost keeps
+the latest accepted snapshot version and uses compare-and-swap persistence to
+avoid overwriting newer progress.
+
 ## CLI
 
 ```bash
 uv run roost engines
-uv run roost enqueue --engine demo --payload '{"count_to":5}'
-uv run roost worker --engines demo --concurrency 4
+uv run roost enqueue --engine watchlist --payload '{"url":"https://example.com"}'
+uv run roost worker --engines watchlist --concurrency 4
 uv run roost status <work_id>
 uv run roost list
 uv run roost events
+uv run roost artifact-show <artifact_id> --ext json
 uv run roost workspace-path <work_id>
 ```
 
@@ -196,6 +225,44 @@ Useful environment variables:
 - `ROOST_REDIS_PREFIX`
 - `ROOST_NAMESPACE`
 - `ROOST_ARTIFACT_ROOT`
+
+## How It Differs
+
+Roost is not a replacement for LangChain, LlamaIndex, CrewAI, AutoGen,
+Temporal, Celery, or your own agent loop. It sits at a different layer.
+
+| Tool category | Great for | Roost's difference |
+| --- | --- | --- |
+| LangChain-style frameworks | Prompts, tools, retrieval, chains, agent composition | Roost does not prescribe cognition. It runs any engine as a durable step-machine. |
+| Temporal-style workflow engines | General distributed workflows with strong orchestration semantics | Roost is smaller and agent-shaped: snapshots, resources, artifacts, and resumable engine steps without a workflow DSL. |
+| Celery-style queues | Fire-and-forget background jobs | Roost persists progress after every step, renews leases, recovers orphaned work, and exposes agent state. |
+| Cron/scripts | Simple repeated automation | Roost gives long-running work identity, retry state, locks, events, DLQ, and inspection. |
+
+The short version:
+
+```text
+LangChain helps decide what an agent should do.
+Temporal helps coordinate workflows.
+Celery runs jobs.
+Roost keeps long-running agents alive, inspectable, and resumable.
+```
+
+## Test
+
+```bash
+uv run --extra dev --extra redis pytest -q
+uv run --extra dev ruff check .
+```
+
+## Limitations
+
+- The current backend is Redis + SAQ.
+- Execution is at-least-once, so engines must make `step()` retry-safe from the
+  same snapshot.
+- Roost stores the latest snapshot for each work item; engines should put large
+  outputs in artifacts.
+- This is not a workflow DSL, prompt framework, hosted control plane, or model
+  router.
 
 ## What This Is Not
 

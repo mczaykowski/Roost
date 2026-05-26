@@ -228,6 +228,21 @@ def _cmd_workspace_path(args: argparse.Namespace) -> None:
     print(manager.workspace_path(args.work_id))
 
 
+def _cmd_artifact_show(args: argparse.Namespace) -> None:
+    from roost.runtime.artifacts import FileArtifactStore
+
+    root = resolve_artifact_root(
+        repo_path=args.repo_path,
+        artifact_root=args.artifact_root,
+        namespace=args.namespace,
+    )
+    store = FileArtifactStore(root_dir=root)
+    content = store.read_bytes(args.artifact_id, ext=args.ext)
+    if content is None:
+        raise SystemExit(f"Artifact not found: {args.artifact_id}")
+    print(content.decode(args.encoding, errors="replace"))
+
+
 def _add_redis_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--redis-url", default=os.getenv("ROOST_REDIS_URL", "redis://localhost:6379/0"))
     parser.add_argument("--queue", default=os.getenv("ROOST_QUEUE", "default"))
@@ -258,7 +273,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("worker", help="Run a Redis-backed worker")
     _add_redis_args(p)
     p.add_argument("--repo-path", default=".")
-    p.add_argument("--engines", default="demo", help="Comma-separated engine ids, or all")
+    p.add_argument("--engines", default="watchlist", help="Comma-separated engine ids, or all")
     p.add_argument("--concurrency", type=int, default=4)
     p.add_argument("--timeout", type=int, default=120)
     p.add_argument("--retries", type=int, default=5)
@@ -292,6 +307,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--workspace-mode", choices=["worktree", "clone"], default="worktree")
     p.add_argument("--namespace")
     p.set_defaults(fn=_cmd_workspace_path)
+
+    p = sub.add_parser("artifact-show", help="Print a content-addressed artifact")
+    p.add_argument("artifact_id")
+    p.add_argument("--ext", default="bin")
+    p.add_argument("--encoding", default="utf-8")
+    p.add_argument("--repo-path", default=".")
+    p.add_argument("--artifact-root")
+    p.add_argument("--namespace")
+    p.set_defaults(fn=_cmd_artifact_show)
 
     return parser
 
