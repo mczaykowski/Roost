@@ -243,6 +243,14 @@ def _cmd_artifact_show(args: argparse.Namespace) -> None:
     print(content.decode(args.encoding, errors="replace"))
 
 
+def _cmd_ui(args: argparse.Namespace) -> None:
+    _require_redis_deps()
+
+    from roost.ui.server import config_from_args, run_console
+
+    run_console(host=args.host, port=args.port, config=config_from_args(args))
+
+
 def _add_redis_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--redis-url", default=os.getenv("ROOST_REDIS_URL", "redis://localhost:6379/0"))
     parser.add_argument("--queue", default=os.getenv("ROOST_QUEUE", "default"))
@@ -316,6 +324,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--artifact-root")
     p.add_argument("--namespace")
     p.set_defaults(fn=_cmd_artifact_show)
+
+    p = sub.add_parser("ui", help="Run the local Roost Console")
+    _add_redis_args(p)
+    p.add_argument("--host", default=os.getenv("ROOST_UI_HOST", "127.0.0.1"))
+    p.add_argument("--port", type=int, default=int(os.getenv("ROOST_UI_PORT", "8766")))
+    p.add_argument("--repo-path", default=".")
+    p.add_argument("--artifact-root")
+    p.set_defaults(fn=_cmd_ui)
 
     return parser
 

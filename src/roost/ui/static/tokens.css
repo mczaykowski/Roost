@@ -1,0 +1,89 @@
+:root {
+  color-scheme: dark;
+
+  --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "SFMono-Regular", "Roboto Mono", Consolas, "Liberation Mono", monospace;
+  --font-feature-tnum: "tnum" 1, "cv11" 1;
+
+  --color-brand: #c8c999;
+  --color-brand-strong: #e1e3aa;
+  --color-canvas: #070807;
+  --color-surface-1: #0d0e0c;
+  --color-surface-2: #12130f;
+  --color-surface-3: #181914;
+  --color-surface-raised: #1d1e18;
+  --color-text: #e8e8dd;
+  --color-text-soft: #b8b9aa;
+  --color-text-muted: #7d7f72;
+  --color-text-faint: #55574f;
+  --color-line: rgba(200, 201, 153, 0.10);
+  --color-line-soft: rgba(200, 201, 153, 0.05);
+  --color-line-strong: rgba(200, 201, 153, 0.22);
+  --color-focus: #d9daa8;
+  --color-overlay: rgba(0, 0, 0, 0.68);
+
+  --surface-page: var(--color-canvas);
+  --surface-panel: var(--color-surface-1);
+  --surface-row: var(--color-surface-2);
+  --surface-row-hover: var(--color-surface-3);
+  --surface-control: #10110e;
+  --surface-control-hover: #181913;
+
+  --border-subtle: 1px solid var(--color-line);
+  --border-strong: 1px solid var(--color-line-strong);
+
+  --state-running-bg: #b48bff;
+  --state-running-text: #140926;
+  --state-queued-bg: #eaeadf;
+  --state-queued-text: #1d1e18;
+  --state-done-bg: #8ce56f;
+  --state-done-text: #0d1d08;
+  --state-failed-bg: #ff857c;
+  --state-failed-text: #240d0b;
+  --state-cancelled-bg: #5f6259;
+  --state-cancelled-text: #eeeeea;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 28px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-14: 56px;
+  --space-16: 64px;
+
+  --radius-1: 2px;
+  --radius-2: 4px;
+  --radius-3: 6px;
+  --radius-4: 8px;
+  --radius-pill: 999px;
+
+  --size-topbar: 72px;
+  --size-page-max: 1720px;
+  --size-control: 44px;
+  --size-row: 64px;
+
+  --text-1: 11px;
+  --text-2: 12px;
+  --text-3: 14px;
+  --text-4: 16px;
+  --text-5: 20px;
+  --text-6: 28px;
+
+  --weight-regular: 500;
+  --weight-semibold: 650;
+  --weight-bold: 760;
+
+  --tracking-wide: 0.04em;
+  --tracking-tight: -0.01em;
+
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --duration-fast: 120ms;
+  --duration-normal: 180ms;
+  --shadow-raised: 0 24px 80px rgba(0, 0, 0, 0.42);
+  --shadow-drawer: -24px 0 80px rgba(0, 0, 0, 0.48);
+}

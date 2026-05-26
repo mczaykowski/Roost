@@ -1,5 +1,7 @@
 # Roost Runtime
 
+![Roost Console running on a laptop](assets/roost_main.png)
+
 Roost is a tiny Redis-backed runtime for long-running agent workers: persist a
 snapshot after every step, lease work to one worker at a time, and resume safely
 after crashes.
@@ -124,6 +126,26 @@ To run the full local e2e, including worker restart and final artifact printing:
 scripts/e2e_watchlist.sh
 ```
 
+## Local Console
+
+Roost also includes a small local console for inspecting work without reading raw
+JSON in the terminal:
+
+```bash
+uv run roost ui
+```
+
+Open `http://127.0.0.1:8766` to see live work, recent events, failed work, and
+JSON artifacts. The console is local-only by default and uses the same Redis
+prefix, namespace, and artifact root settings as the CLI.
+
+![Roost Console work view](assets/01.png)
+
+The console keeps the runtime layer visible: live work, saved snapshots, event
+history, failures, and output artifacts.
+
+![Roost Console work detail](assets/02.png)
+
 ## Engine Contract
 
 Engines own domain-specific state transitions. The runtime owns durability.
@@ -215,6 +237,7 @@ uv run roost status <work_id>
 uv run roost list
 uv run roost events
 uv run roost artifact-show <artifact_id> --ext json
+uv run roost ui
 uv run roost workspace-path <work_id>
 ```
 
