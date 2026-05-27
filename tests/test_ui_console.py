@@ -19,3 +19,14 @@ def test_console_static_tokens_are_packaged():
 
     assert "--color-brand" in tokens.read_text(encoding="utf-8")
     assert "Roost Console" in index.read_text(encoding="utf-8")
+
+
+def test_console_static_includes_recovery_actions():
+    app = resources.files("roost.ui.static").joinpath("app.js").read_text(encoding="utf-8")
+    index = resources.files("roost.ui.static").joinpath("index.html").read_text(encoding="utf-8")
+
+    assert "/retry" in app
+    assert "/cancel" in app
+    assert "/replay" in app
+    assert "/ack" in app
+    assert "detailActions" in index

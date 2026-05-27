@@ -82,7 +82,8 @@ button {
 .filter:focus-visible,
 .icon-button:focus-visible,
 .row-button:focus-visible,
-.artifact-card button:focus-visible {
+.artifact-card button:focus-visible,
+.action-button:focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
@@ -628,6 +629,62 @@ th:nth-child(7) {
   font-family: var(--font-mono);
   font-size: var(--text-2);
   font-variant-numeric: tabular-nums;
+}
+
+.detail-actions {
+  padding: var(--space-4) 0;
+  border-bottom: 1px solid var(--color-line);
+}
+
+.action-strip,
+.row-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.action-button {
+  min-width: 72px;
+  height: 30px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-2);
+  color: var(--color-text);
+  background: var(--surface-control);
+  font-size: var(--text-1);
+  font-weight: var(--weight-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--tracking-wide);
+  transition:
+    background var(--duration-fast) var(--ease-standard),
+    border-color var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+}
+
+.action-button:hover {
+  border-color: var(--color-line-strong);
+  background: var(--surface-control-hover);
+}
+
+.action-muted {
+  color: var(--color-text-muted);
+}
+
+.action-danger {
+  color: var(--state-failed-bg);
+  border-color: rgba(255, 133, 124, 0.24);
+  background: rgba(255, 133, 124, 0.06);
+}
+
+.action-note,
+.action-message {
+  color: var(--color-text-muted);
+  font-size: var(--text-2);
+}
+
+.action-message {
+  margin-left: auto;
 }
 
 .icon-button {

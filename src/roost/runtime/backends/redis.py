@@ -539,11 +539,14 @@ class RedisControlPlane:
         end = start + max(0, limit) - 1
         raws = await self.redis.lrange(self.keys.dlq(), start, end)
         out: list[dict] = []
-        for raw in raws:
+        for i, raw in enumerate(raws):
             try:
-                out.append(json.loads(raw))
+                row = json.loads(raw)
             except Exception:
-                out.append({"raw": raw})
+                row = {"raw": raw}
+            if isinstance(row, dict):
+                row.setdefault("index", start + i)
+            out.append(row)
         return out
 
     async def get_dlq(self, index: int) -> Optional[dict]:

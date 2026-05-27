@@ -3,6 +3,7 @@ const state = {
   filter: "",
   search: "",
   workRows: [],
+  detail: null,
 };
 
 const $ = (selector) => document.querySelector(selector);
@@ -55,6 +56,17 @@ async function getJson(url) {
   const res = await fetch(url);
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   return res.json();
+}
+
+async function postJson(url, payload = {}) {
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `${res.status} ${res.statusText}`);
+  return data;
 }
 
 function setConnection(main, sub) {
@@ -179,15 +191,21 @@ function eventText(row) {
   if (row.kind === "work_state_changed") return `${stateLabel(row.prev_state)} to ${stateLabel(row.state)}`;
   if (row.kind === "work_enqueued") return "Work added";
   if (row.kind === "dlq_pushed") return "Moved to failed work";
+  if (row.kind === "work_retry_requested") return "Retry requested";
+  if (row.kind === "work_cancelled") return "Cancelled";
+  if (row.kind === "dlq_replay_requested") return "DLQ replay requested";
   return row.kind || "Runtime event";
 }
 
 function renderFailed(rows, dlq) {
-  const combined = rows.length ? rows : dlq;
+  const combined = [
+    ...rows.map((row) => ({...row, source: "failed"})),
+    ...dlq.map((row) => ({...row, source: "dlq"})),
+  ];
   if (!combined.length) {
     $("#failedRows").innerHTML = `
       <tr class="empty-row">
-        <td colspan="4">
+        <td colspan="5">
           <div class="empty">No failed work.</div>
         </td>
       </tr>
@@ -197,20 +215,32 @@ function renderFailed(rows, dlq) {
   $("#failedRows").innerHTML = combined
     .map((row) => {
       const error = row.last_error?.message || row.last_error?.type || "-";
+      const action =
+        row.source === "dlq"
+          ? `
+            <div class="row-actions">
+              <button class="action-button" data-dlq-replay="${row.index}">Replay</button>
+              <button class="action-button action-muted" data-dlq-ack="${row.index}">Ack</button>
+            </div>
+          `
+          : `<button class="action-button" data-retry="${row.work_id}">Retry</button>`;
       return `
         <tr>
           <td class="mono">${shortId(row.work_id || "")}</td>
           <td>${row.engine || "-"}</td>
           <td>${row.step || "-"}</td>
           <td>${error}</td>
+          <td>${action}</td>
         </tr>
       `;
     })
     .join("");
+  bindActionButtons();
 }
 
 async function openDetail(workId) {
   const detail = await getJson(`/api/work/${encodeURIComponent(workId)}`);
+  state.detail = detail;
   $("#detailTitle").textContent = shortId(workId);
   $("#detailMeta").textContent = [
     detail.meta?.state ? stateLabel(detail.meta.state) : null,
@@ -221,9 +251,85 @@ async function openDetail(workId) {
     .join(" / ");
   $("#payloadJson").textContent = json(detail.item?.payload || {});
   $("#snapshotJson").textContent = json(detail.snapshot || {});
+  renderDetailActions(detail);
   renderArtifacts(detail.snapshot?.artifacts || []);
   $("#detailDrawer").classList.add("is-open");
   $("#detailDrawer").setAttribute("aria-hidden", "false");
+}
+
+function renderDetailActions(detail, message = "") {
+  const workId = detail.item?.work_id || detail.meta?.work_id;
+  const status = detail.meta?.state || detail.snapshot?.status || "queued";
+  const canCancel = ["queued", "running"].includes(status);
+  const canRetry = ["failed", "cancelled", "done"].includes(status);
+  const buttons = [];
+
+  if (canRetry) {
+    buttons.push(`<button class="action-button" data-retry="${workId}">Retry</button>`);
+  }
+  if (canCancel) {
+    buttons.push(`<button class="action-button action-danger" data-cancel="${workId}">Cancel</button>`);
+  }
+
+  $("#detailActions").innerHTML = `
+    <div class="action-strip">
+      ${buttons.length ? buttons.join("") : `<span class="action-note">No action needed.</span>`}
+      <span class="action-message">${message}</span>
+    </div>
+  `;
+  bindActionButtons();
+}
+
+function setDetailMessage(message) {
+  if (!state.detail) return;
+  renderDetailActions(state.detail, message);
+}
+
+async function runWorkAction(kind, workId) {
+  if (!workId) return;
+  try {
+    if (kind === "retry") {
+      await postJson(`/api/work/${encodeURIComponent(workId)}/retry`, {});
+      setDetailMessage("Retry queued.");
+    } else if (kind === "cancel") {
+      await postJson(`/api/work/${encodeURIComponent(workId)}/cancel`, {reason: "ui_cancelled"});
+      setDetailMessage("Cancelled.");
+    }
+    await refresh();
+    if (state.detail?.item?.work_id === workId || state.detail?.meta?.work_id === workId) {
+      await openDetail(workId);
+    }
+  } catch (err) {
+    setDetailMessage(err.message);
+  }
+}
+
+async function runDlqAction(kind, index) {
+  try {
+    if (kind === "replay") {
+      await postJson(`/api/dlq/${encodeURIComponent(index)}/replay`, {ack: true});
+    } else {
+      await postJson(`/api/dlq/${encodeURIComponent(index)}/ack`, {});
+    }
+    await refresh();
+  } catch (err) {
+    setConnection("Action failed", err.message);
+  }
+}
+
+function bindActionButtons() {
+  $$("[data-retry]").forEach((button) => {
+    button.onclick = () => runWorkAction("retry", button.dataset.retry);
+  });
+  $$("[data-cancel]").forEach((button) => {
+    button.onclick = () => runWorkAction("cancel", button.dataset.cancel);
+  });
+  $$("[data-dlq-replay]").forEach((button) => {
+    button.onclick = () => runDlqAction("replay", button.dataset.dlqReplay);
+  });
+  $$("[data-dlq-ack]").forEach((button) => {
+    button.onclick = () => runDlqAction("ack", button.dataset.dlqAck);
+  });
 }
 
 function renderArtifacts(artifacts) {
