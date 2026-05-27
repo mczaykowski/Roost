@@ -8,18 +8,32 @@ import time
 import uuid
 from typing import Any, Optional
 
+from roost.runtime.config import (
+    DEFAULT_QUEUE,
+    DEFAULT_REDIS_PREFIX,
+    DEFAULT_REDIS_URL,
+    DEFAULT_WORKSPACE_MODE,
+    load_roost_config,
+    resolve_config_relative_path,
+    resolve_roost_config_path,
+)
 from roost.runtime.models import WorkItem
 from roost.runtime.namespacing import apply_namespace, resolve_artifact_root, resolve_workspace_root
 from roost.runtime.registry import EngineRegistry
 
 
-def _require_redis_deps() -> None:
+def _missing_redis_deps() -> list[str]:
     missing = []
     for module in ("redis", "saq"):
         try:
             __import__(module)
         except Exception:
             missing.append(module)
+    return missing
+
+
+def _require_redis_deps() -> None:
+    missing = _missing_redis_deps()
     if missing:
         raise SystemExit(
             "Missing Redis runtime dependencies. Install with:\n"
@@ -38,6 +52,114 @@ def _json_loads(value: str) -> dict[str, Any]:
     return out
 
 
+def _choose(*values: Any) -> Any:
+    for value in values:
+        if value is not None:
+            return value
+    return None
+
+
+def _apply_runtime_config(args: argparse.Namespace) -> argparse.Namespace:
+    repo_path = getattr(args, "repo_path", ".")
+    config_path, explicit = resolve_roost_config_path(
+        repo_path=repo_path,
+        cli_path=getattr(args, "config", None),
+    )
+    config = load_roost_config(config_path, explicit=explicit)
+    args.config_path = config_path
+    args.roost_config = config
+
+    if hasattr(args, "redis_url"):
+        args.redis_url = _choose(
+            args.redis_url,
+            os.getenv("ROOST_REDIS_URL"),
+            config.redis.url if config else None,
+            DEFAULT_REDIS_URL,
+        )
+    if hasattr(args, "queue"):
+        args.queue = _choose(args.queue, os.getenv("ROOST_QUEUE"), config.redis.queue if config else None, DEFAULT_QUEUE)
+    if hasattr(args, "redis_prefix"):
+        args.redis_prefix = _choose(
+            args.redis_prefix,
+            os.getenv("ROOST_REDIS_PREFIX"),
+            config.redis.prefix if config else None,
+            DEFAULT_REDIS_PREFIX,
+        )
+    if hasattr(args, "namespace"):
+        args.namespace = _choose(args.namespace, os.getenv("ROOST_NAMESPACE"), config.redis.namespace if config else None)
+    if hasattr(args, "engines"):
+        args.engines = _choose(args.engines, config.worker.engines if config else None, "watchlist")
+    if hasattr(args, "concurrency"):
+        args.concurrency = _choose(args.concurrency, config.worker.concurrency if config else None, 4)
+    if hasattr(args, "timeout"):
+        args.timeout = _choose(args.timeout, config.worker.timeout_seconds if config else None, 120)
+    if hasattr(args, "retries"):
+        args.retries = _choose(args.retries, config.worker.retries if config else None, 5)
+    if hasattr(args, "lease_ttl"):
+        args.lease_ttl = _choose(args.lease_ttl, config.worker.lease_ttl_seconds if config else None, 60)
+    if hasattr(args, "workspace_root"):
+        configured = resolve_config_relative_path(
+            config.worker.workspace_root if config else None,
+            config_path=config_path,
+            repo_path=repo_path,
+        )
+        args.workspace_root = _choose(args.workspace_root, os.getenv("ROOST_WORKSPACE_ROOT"), configured)
+    if hasattr(args, "workspace_mode"):
+        args.workspace_mode = _choose(
+            args.workspace_mode,
+            os.getenv("ROOST_WORKSPACE_MODE"),
+            config.worker.workspace_mode if config else None,
+            DEFAULT_WORKSPACE_MODE,
+        )
+    if hasattr(args, "artifact_root"):
+        configured = resolve_config_relative_path(
+            config.artifacts.root if config else None,
+            config_path=config_path,
+            repo_path=repo_path,
+        )
+        args.artifact_root = _choose(args.artifact_root, os.getenv("ROOST_ARTIFACT_ROOT"), configured)
+    return args
+
+
+def _roost_toml_template(args: argparse.Namespace) -> str:
+    namespace = f'namespace = "{args.namespace}"\n' if args.namespace else "# namespace = \"dev\"\n"
+    return f"""# Roost runtime configuration.
+# CLI flags override environment variables; environment variables override this file.
+
+[redis]
+url = "{args.redis_url}"
+queue = "{args.queue}"
+prefix = "{args.redis_prefix}"
+{namespace}
+[worker]
+engines = "{args.engines}"
+concurrency = {args.concurrency}
+timeout_seconds = {args.timeout}
+retries = {args.retries}
+lease_ttl_seconds = {args.lease_ttl}
+workspace_root = "{args.workspace_root}"
+workspace_mode = "{args.workspace_mode}"
+
+[artifacts]
+root = "{args.artifact_root}"
+
+# [[triggers]]
+# on_engine_done = "watchlist"
+# enqueue_engine = "demo"
+"""
+
+
+def _cmd_init(args: argparse.Namespace) -> None:
+    path = os.path.abspath(args.path)
+    if os.path.exists(path) and not args.force:
+        raise SystemExit(f"{path} already exists. Re-run with --force to overwrite it.")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(_roost_toml_template(args))
+    print(f"Created {path}")
+    print("Next: uv run roost doctor --config " + path)
+
+
 def _cmd_engines(_args: argparse.Namespace) -> None:
     registry = EngineRegistry.from_entry_points()
     for info in registry.info():
@@ -45,6 +167,7 @@ def _cmd_engines(_args: argparse.Namespace) -> None:
 
 
 def _cmd_enqueue(args: argparse.Namespace) -> None:
+    _apply_runtime_config(args)
     _require_redis_deps()
 
     from redis import asyncio as aioredis
@@ -87,6 +210,7 @@ def _cmd_enqueue(args: argparse.Namespace) -> None:
 
 
 def _cmd_worker(args: argparse.Namespace) -> None:
+    _apply_runtime_config(args)
     _require_redis_deps()
 
     from roost.runtime.swarm import RedisSwarm, RedisUniversalSwarm, SwarmConfig
@@ -127,6 +251,7 @@ def _cmd_worker(args: argparse.Namespace) -> None:
             lease_ttl_seconds=args.lease_ttl,
             job_timeout_seconds=args.timeout,
             job_retries=args.retries,
+            roost_config=args.roost_config,
         )
         swarm = (
             RedisSwarm(next(iter(engines.values())), config=config)
@@ -142,6 +267,7 @@ def _cmd_worker(args: argparse.Namespace) -> None:
 
 
 def _cmd_status(args: argparse.Namespace) -> None:
+    _apply_runtime_config(args)
     _require_redis_deps()
 
     from redis import asyncio as aioredis
@@ -171,6 +297,7 @@ def _cmd_status(args: argparse.Namespace) -> None:
 
 
 def _cmd_list(args: argparse.Namespace) -> None:
+    _apply_runtime_config(args)
     _require_redis_deps()
 
     from redis import asyncio as aioredis
@@ -195,6 +322,7 @@ def _cmd_list(args: argparse.Namespace) -> None:
 
 
 def _cmd_events(args: argparse.Namespace) -> None:
+    _apply_runtime_config(args)
     _require_redis_deps()
 
     from redis import asyncio as aioredis
@@ -215,6 +343,7 @@ def _cmd_events(args: argparse.Namespace) -> None:
 
 
 def _cmd_workspace_path(args: argparse.Namespace) -> None:
+    _apply_runtime_config(args)
     from roost.runtime.workspaces import WorkspaceManager, WorkspaceSpec
 
     root = resolve_workspace_root(
@@ -229,6 +358,7 @@ def _cmd_workspace_path(args: argparse.Namespace) -> None:
 
 
 def _cmd_artifact_show(args: argparse.Namespace) -> None:
+    _apply_runtime_config(args)
     from roost.runtime.artifacts import FileArtifactStore
 
     root = resolve_artifact_root(
@@ -244,6 +374,7 @@ def _cmd_artifact_show(args: argparse.Namespace) -> None:
 
 
 def _cmd_ui(args: argparse.Namespace) -> None:
+    _apply_runtime_config(args)
     _require_redis_deps()
 
     from roost.ui.server import config_from_args, run_console
@@ -251,16 +382,156 @@ def _cmd_ui(args: argparse.Namespace) -> None:
     run_console(host=args.host, port=args.port, config=config_from_args(args))
 
 
+def _nearest_existing_parent(path: str) -> str:
+    current = os.path.abspath(path)
+    while not os.path.exists(current):
+        parent = os.path.dirname(current)
+        if parent == current:
+            return current
+        current = parent
+    return current
+
+
+def _doctor_line(status: str, label: str, detail: str = "") -> None:
+    suffix = f" - {detail}" if detail else ""
+    print(f"{status:<4} {label}{suffix}")
+
+
+def _cmd_doctor(args: argparse.Namespace) -> None:
+    failures = 0
+    warnings = 0
+    print("Roost doctor")
+
+    try:
+        _apply_runtime_config(args)
+        if args.config_path:
+            _doctor_line("OK", "config", args.config_path)
+        else:
+            warnings += 1
+            _doctor_line("WARN", "config", "no roost.toml found; using CLI/env/defaults")
+    except Exception as exc:
+        _doctor_line("FAIL", "config", str(exc))
+        raise SystemExit(1) from exc
+
+    try:
+        redis_prefix = apply_namespace(args.redis_prefix, args.namespace)
+        _doctor_line("OK", "namespace", redis_prefix)
+    except Exception as exc:
+        failures += 1
+        _doctor_line("FAIL", "namespace", str(exc))
+        redis_prefix = args.redis_prefix
+
+    missing = _missing_redis_deps()
+    if missing:
+        failures += 1
+        _doctor_line("FAIL", "redis dependencies", f"missing: {', '.join(missing)}")
+    else:
+        _doctor_line("OK", "redis dependencies", "redis and saq installed")
+
+        async def ping() -> None:
+            from redis import asyncio as aioredis
+
+            redis = aioredis.from_url(args.redis_url, decode_responses=True)
+            try:
+                await redis.ping()
+            finally:
+                await redis.aclose()
+
+        try:
+            asyncio.run(ping())
+            _doctor_line("OK", "redis connection", args.redis_url)
+        except Exception as exc:
+            failures += 1
+            _doctor_line("FAIL", "redis connection", f"{args.redis_url} ({exc})")
+
+    registry = EngineRegistry.from_entry_points()
+    available = registry.engine_ids()
+    selected = available if args.engines == "all" else [e.strip() for e in args.engines.split(",") if e.strip()]
+    unknown = [engine for engine in selected if engine not in available]
+    if unknown:
+        failures += 1
+        _doctor_line("FAIL", "engines", f"unknown: {', '.join(unknown)}; available: {', '.join(available)}")
+    else:
+        _doctor_line("OK", "engines", ", ".join(selected) if selected else "(none)")
+
+    artifact_root = resolve_artifact_root(
+        repo_path=args.repo_path,
+        artifact_root=args.artifact_root,
+        namespace=args.namespace,
+    )
+    artifact_parent = _nearest_existing_parent(artifact_root)
+    if os.path.isdir(artifact_root):
+        writable = os.access(artifact_root, os.W_OK)
+        if writable:
+            _doctor_line("OK", "artifacts", artifact_root)
+        else:
+            failures += 1
+            _doctor_line("FAIL", "artifacts", f"{artifact_root} is not writable")
+    elif os.access(artifact_parent, os.W_OK):
+        _doctor_line("OK", "artifacts", f"{artifact_root} can be created")
+    else:
+        failures += 1
+        _doctor_line("FAIL", "artifacts", f"parent is not writable: {artifact_parent}")
+
+    workspace_root = resolve_workspace_root(
+        repo_path=args.repo_path,
+        workspace_root=args.workspace_root,
+        namespace=args.namespace,
+    )
+    workspace_parent = _nearest_existing_parent(workspace_root)
+    if args.workspace_mode not in {"worktree", "clone"}:
+        failures += 1
+        _doctor_line("FAIL", "workspace mode", args.workspace_mode)
+    elif os.path.isdir(workspace_root):
+        _doctor_line("OK", "workspace", f"{workspace_root} ({args.workspace_mode})")
+    elif os.access(workspace_parent, os.W_OK):
+        _doctor_line("OK", "workspace", f"{workspace_root} can be created ({args.workspace_mode})")
+    else:
+        failures += 1
+        _doctor_line("FAIL", "workspace", f"parent is not writable: {workspace_parent}")
+
+    _doctor_line("OK", "queue", args.queue)
+    if failures:
+        print(f"\n{failures} check(s) failed.")
+        raise SystemExit(1)
+    if warnings:
+        print(f"\nPassed with {warnings} warning(s).")
+    else:
+        print("\nAll checks passed.")
+
+
+def _add_config_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--config", help="Path to roost.toml")
+
+
 def _add_redis_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--redis-url", default=os.getenv("ROOST_REDIS_URL", "redis://localhost:6379/0"))
-    parser.add_argument("--queue", default=os.getenv("ROOST_QUEUE", "default"))
-    parser.add_argument("--redis-prefix", default=os.getenv("ROOST_REDIS_PREFIX", "roost"))
-    parser.add_argument("--namespace", default=os.getenv("ROOST_NAMESPACE"))
+    _add_config_arg(parser)
+    parser.add_argument("--redis-url")
+    parser.add_argument("--queue")
+    parser.add_argument("--redis-prefix")
+    parser.add_argument("--namespace")
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Roost durable runtime for agent step-machines")
     sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p = sub.add_parser("init", help="Create a minimal roost.toml")
+    p.add_argument("--path", default="roost.toml")
+    p.add_argument("--force", action="store_true")
+    p.add_argument("--redis-url", default=DEFAULT_REDIS_URL)
+    p.add_argument("--queue", default=DEFAULT_QUEUE)
+    p.add_argument("--redis-prefix", default=DEFAULT_REDIS_PREFIX)
+    p.add_argument("--namespace")
+    p.add_argument("--engines", default="watchlist")
+    p.add_argument("--concurrency", type=int, default=4)
+    p.add_argument("--timeout", type=int, default=120)
+    p.add_argument("--retries", type=int, default=5)
+    p.add_argument("--lease-ttl", type=int, default=60)
+    p.add_argument("--workspace-root", default=".roost/workspaces")
+    p.add_argument("--workspace-mode", choices=["worktree", "clone"], default=DEFAULT_WORKSPACE_MODE)
+    p.add_argument("--artifact-root", default=".roost/artifacts")
+    p.set_defaults(fn=_cmd_init)
 
     p = sub.add_parser("engines", help="List installed engine entry points")
     p.set_defaults(fn=_cmd_engines)
@@ -274,20 +545,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--priority", type=int, default=0)
     p.add_argument("--resource", action="append")
     p.add_argument("--delay-seconds", type=int, default=0)
-    p.add_argument("--timeout", type=int, default=120)
-    p.add_argument("--retries", type=int, default=5)
+    p.add_argument("--timeout", type=int)
+    p.add_argument("--retries", type=int)
     p.set_defaults(fn=_cmd_enqueue)
 
     p = sub.add_parser("worker", help="Run a Redis-backed worker")
     _add_redis_args(p)
     p.add_argument("--repo-path", default=".")
-    p.add_argument("--engines", default="watchlist", help="Comma-separated engine ids, or all")
-    p.add_argument("--concurrency", type=int, default=4)
-    p.add_argument("--timeout", type=int, default=120)
-    p.add_argument("--retries", type=int, default=5)
-    p.add_argument("--lease-ttl", type=int, default=60)
+    p.add_argument("--engines", help="Comma-separated engine ids, or all")
+    p.add_argument("--concurrency", type=int)
+    p.add_argument("--timeout", type=int)
+    p.add_argument("--retries", type=int)
+    p.add_argument("--lease-ttl", type=int)
     p.add_argument("--workspace-root")
-    p.add_argument("--workspace-mode", choices=["worktree", "clone"], default="worktree")
+    p.add_argument("--workspace-mode", choices=["worktree", "clone"])
     p.add_argument("--artifact-root")
     p.set_defaults(fn=_cmd_worker)
 
@@ -309,14 +580,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=_cmd_events)
 
     p = sub.add_parser("workspace-path", help="Print the isolated workspace path for a work id")
+    _add_config_arg(p)
     p.add_argument("work_id")
     p.add_argument("--repo-path", default=".")
     p.add_argument("--workspace-root")
-    p.add_argument("--workspace-mode", choices=["worktree", "clone"], default="worktree")
+    p.add_argument("--workspace-mode", choices=["worktree", "clone"])
     p.add_argument("--namespace")
     p.set_defaults(fn=_cmd_workspace_path)
 
     p = sub.add_parser("artifact-show", help="Print a content-addressed artifact")
+    _add_config_arg(p)
     p.add_argument("artifact_id")
     p.add_argument("--ext", default="bin")
     p.add_argument("--encoding", default="utf-8")
@@ -332,6 +605,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--repo-path", default=".")
     p.add_argument("--artifact-root")
     p.set_defaults(fn=_cmd_ui)
+
+    p = sub.add_parser("doctor", help="Check local Roost runtime configuration")
+    _add_redis_args(p)
+    p.add_argument("--repo-path", default=".")
+    p.add_argument("--engines")
+    p.add_argument("--workspace-root")
+    p.add_argument("--workspace-mode", choices=["worktree", "clone"])
+    p.add_argument("--artifact-root")
+    p.set_defaults(fn=_cmd_doctor)
 
     return parser
 

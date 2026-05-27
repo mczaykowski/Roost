@@ -43,10 +43,22 @@ Install dependencies:
 uv sync --extra redis --extra dev
 ```
 
+Create a local config:
+
+```bash
+uv run roost init
+```
+
 Start Redis:
 
 ```bash
 docker run --rm -p 6379:6379 redis:7
+```
+
+Check the local setup:
+
+```bash
+uv run roost doctor
 ```
 
 In one terminal, run a worker:
@@ -230,6 +242,8 @@ avoid overwriting newer progress.
 ## CLI
 
 ```bash
+uv run roost init
+uv run roost doctor
 uv run roost engines
 uv run roost enqueue --engine watchlist --payload '{"url":"https://example.com"}'
 uv run roost worker --engines watchlist --concurrency 4
@@ -248,6 +262,9 @@ Useful environment variables:
 - `ROOST_REDIS_PREFIX`
 - `ROOST_NAMESPACE`
 - `ROOST_ARTIFACT_ROOT`
+
+`roost.toml` uses the same settings in file form. CLI flags override
+environment variables, and environment variables override `roost.toml`.
 
 ## How It Differs
 
@@ -276,6 +293,16 @@ Roost keeps long-running agents alive, inspectable, and resumable.
 uv run --extra dev --extra redis pytest -q
 uv run --extra dev ruff check .
 ```
+
+## Roadmap
+
+Roost is moving toward a production-grade runtime/control plane for durable
+agent work while keeping the engine contract small. The near-term path is OSS
+adoption first, Postgres as the production system of record, Redis for local and
+lightweight runtime setups, and bring-your-own workers before any managed
+execution.
+
+Read the full phase-gated roadmap in [ROADMAP.md](ROADMAP.md).
 
 ## Limitations
 
