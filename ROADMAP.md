@@ -14,6 +14,10 @@ The direction is intentionally narrow:
 - Bring-your-own workers before managed execution.
 - No prompt framework, model router, chain DSL, or workflow-language creep.
 
+The storage architecture is captured in
+[docs/runtime-storage.md](docs/runtime-storage.md): Redis is movement, Postgres
+is memory, and object storage is evidence.
+
 ## North Star
 
 Roost should make production agent work feel boring in the best way:
@@ -199,4 +203,3 @@ failure, not only happy paths:
 - CLI smoke tests for `init`, `doctor`, `migrate`, `retry`, and `dlq`.
 - UI smoke tests for list, detail, failed work, retry, and empty states.
 - The watchlist e2e as the canonical confidence check in CI.
-

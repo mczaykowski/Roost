@@ -309,6 +309,8 @@ lightweight runtime setups, and bring-your-own workers before any managed
 execution.
 
 Read the full phase-gated roadmap in [ROADMAP.md](ROADMAP.md).
+The storage architecture rationale is in
+[docs/runtime-storage.md](docs/runtime-storage.md).
 
 ## Limitations
 
