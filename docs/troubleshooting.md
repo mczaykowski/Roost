@@ -62,6 +62,33 @@ Useful commands:
 uv run roost list
 uv run roost events
 uv run roost status <work_id>
+uv run roost inspect <work_id>
+```
+
+If the work is safe to run again, re-enqueue it:
+
+```bash
+uv run roost retry <work_id>
+```
+
+If the work should stop being considered active, cancel it:
+
+```bash
+uv run roost cancel <work_id> --reason operator_request
+```
+
+## Dead-Lettered Work
+
+List failed work that reached the dead-letter queue:
+
+```bash
+uv run roost dlq list
+```
+
+Replay the first entry and remove it from the queue after it is enqueued:
+
+```bash
+uv run roost dlq replay 0 --ack
 ```
 
 ## Artifacts Are Missing

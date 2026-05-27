@@ -99,6 +99,9 @@ class RedisLeaseManager:
         res = await self._release_script(keys=[self.keys.lease(lease.work_id)], args=[expected])
         return bool(res)
 
+    async def clear(self, work_id: str) -> int:
+        return int(await self.redis.delete(self.keys.lease(work_id)) or 0)
+
 
 class RedisResourceManager:
     """
@@ -162,6 +165,12 @@ class RedisResourceManager:
         keys = [self.keys.resource(r) for r in sorted(set(resources))]
         res = await self._release_script(keys=keys, args=[owner_value])
         return int(res or 0)
+
+    async def clear(self, *, resources: list[str]) -> int:
+        if not resources:
+            return 0
+        keys = [self.keys.resource(r) for r in sorted(set(resources))]
+        return int(await self.redis.delete(*keys) or 0)
 
 
 class RedisWorkItemStore:
@@ -563,3 +572,20 @@ class RedisControlPlane:
             return False
         removed = int(await self.redis.lrem(self.keys.dlq(), 1, tombstone))
         return removed == 1
+
+    async def ack_dlq_work_id(self, work_id: str) -> int:
+        """
+        Best-effort acknowledge of all DLQ entries for a work id.
+        """
+        if not work_id:
+            return 0
+        rows = await self.redis.lrange(self.keys.dlq(), 0, -1)
+        removed = 0
+        for raw in rows:
+            try:
+                event = json.loads(raw)
+            except Exception:
+                continue
+            if event.get("work_id") == work_id:
+                removed += int(await self.redis.lrem(self.keys.dlq(), 1, raw) or 0)
+        return removed

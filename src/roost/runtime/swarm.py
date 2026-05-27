@@ -124,6 +124,10 @@ class _RedisSwarmRuntime:
         job_attempt: int = 1,
         job_id: str | None = None,
     ) -> Dict[str, Any]:
+        meta = await self.control.get_meta(work_id)
+        if meta and meta.get("state") == "cancelled":
+            return {"status": "cancelled", "reason": "operator_cancelled", "job_id": job_id}
+
         lease = await self.leases.try_acquire(work_id, self.worker_id, ttl_seconds=self.config.lease_ttl_seconds)
         if not lease:
             await self.control.set_state(work_id=work_id, engine=item.engine, state="queued", step="lease_wait")
@@ -160,6 +164,10 @@ class _RedisSwarmRuntime:
         renew_task = asyncio.create_task(renew_loop())
 
         try:
+            meta = await self.control.get_meta(work_id)
+            if meta and meta.get("state") == "cancelled":
+                return {"status": "cancelled", "reason": "operator_cancelled", "job_id": job_id}
+
             claimed_resources = list(item.resources or [])
             if claimed_resources:
                 ok = await self.resources.acquire(
@@ -232,6 +240,10 @@ class _RedisSwarmRuntime:
             new_snapshot.status = "done" if new_snapshot.is_finished else "running"
             if new_snapshot.is_finished:
                 new_snapshot.finished_at = time.time()
+
+            meta = await self.control.get_meta(work_id)
+            if meta and meta.get("state") == "cancelled":
+                return {"status": "cancelled", "reason": "operator_cancelled", "job_id": job_id}
 
             expected_version = snapshot.version
             ok = await self.snapshots.save(

@@ -248,8 +248,13 @@ uv run roost engines
 uv run roost enqueue --engine watchlist --payload '{"url":"https://example.com"}'
 uv run roost worker --engines watchlist --concurrency 4
 uv run roost status <work_id>
+uv run roost inspect <work_id>
 uv run roost list
 uv run roost events
+uv run roost retry <work_id>
+uv run roost cancel <work_id>
+uv run roost dlq list
+uv run roost dlq replay 0 --ack
 uv run roost artifact-show <artifact_id> --ext json
 uv run roost ui
 uv run roost workspace-path <work_id>

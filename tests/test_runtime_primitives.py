@@ -5,8 +5,9 @@ import re
 
 from roost.runtime.artifacts import FileArtifactStore
 from roost.runtime.backends.redis import RedisKeys
+from roost.runtime.models import WorkItem
 from roost.runtime.registry import EngineRegistry
-from roost.runtime.swarm import RedisSwarm
+from roost.runtime.swarm import RedisSwarm, _RedisSwarmRuntime
 from roost.runtime.workspaces import WorkspaceManager, WorkspaceSpec
 
 
@@ -54,3 +55,20 @@ def test_workspace_path_is_stable_and_safe(tmp_path):
     assert "/" not in leaf and "\\" not in leaf
     assert leaf.startswith("A-B-C-")
     assert re.fullmatch(r"[A-Za-z0-9._-]+-[0-9a-f]{10}", leaf)
+
+
+async def test_runtime_skips_operator_cancelled_work_before_lease():
+    class Control:
+        async def get_meta(self, work_id):
+            return {"work_id": work_id, "state": "cancelled"}
+
+    runtime = _RedisSwarmRuntime.__new__(_RedisSwarmRuntime)
+    runtime.control = Control()
+
+    result = await runtime._execute_one_step_impl(
+        work_id="work-1",
+        item=WorkItem(work_id="work-1", engine="dummy"),
+        engine=_DummyEngine(),
+    )
+
+    assert result == {"status": "cancelled", "reason": "operator_cancelled", "job_id": None}
