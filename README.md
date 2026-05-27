@@ -148,8 +148,9 @@ uv run roost ui
 ```
 
 Open `http://127.0.0.1:8766` to see live work, recent events, failed work, and
-JSON artifacts. The console is local-only by default and uses the same Redis
-prefix, namespace, and artifact root settings as the CLI.
+JSON artifacts. The console can also retry, cancel, replay, and acknowledge
+work, using the same Redis prefix, namespace, and artifact root settings as the
+CLI. It is local-only by default.
 
 ![Roost Console work view](assets/01.png)
 

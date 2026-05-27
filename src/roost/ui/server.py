@@ -16,7 +16,15 @@ from urllib.parse import parse_qs, unquote, urlparse
 from redis import asyncio as aioredis
 
 from roost.runtime.artifacts import FileArtifactStore
-from roost.runtime.backends.redis import RedisControlPlane, RedisKeys, RedisSnapshotStore, RedisWorkItemStore
+from roost.runtime.backends.redis import (
+    RedisControlPlane,
+    RedisInflightStore,
+    RedisKeys,
+    RedisLeaseManager,
+    RedisResourceManager,
+    RedisSnapshotStore,
+    RedisWorkItemStore,
+)
 from roost.runtime.namespacing import apply_namespace, resolve_artifact_root
 
 
@@ -80,6 +88,8 @@ def _build_handler(config: ConsoleConfig) -> type[BaseHTTPRequestHandler]:
                     self._send_json(_artifact(config, artifact_id=artifact_id, ext=ext))
                 else:
                     self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+            except LookupError as exc:
+                self._send_json({"error": str(exc)}, status=404)
             except FileNotFoundError:
                 self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             except (BrokenPipeError, ConnectionResetError):
@@ -87,8 +97,49 @@ def _build_handler(config: ConsoleConfig) -> type[BaseHTTPRequestHandler]:
             except Exception as exc:
                 self._send_json({"error": f"{exc.__class__.__name__}: {exc}"}, status=500)
 
+        def do_POST(self) -> None:  # noqa: N802
+            parsed = urlparse(self.path)
+            path = unquote(parsed.path)
+
+            try:
+                body = self._read_json_body()
+                if path.startswith("/api/work/") and path.endswith("/retry"):
+                    work_id = path.removeprefix("/api/work/").removesuffix("/retry").strip("/")
+                    self._send_json(asyncio.run(_retry_work(config, work_id=work_id, payload=body)))
+                elif path.startswith("/api/work/") and path.endswith("/cancel"):
+                    work_id = path.removeprefix("/api/work/").removesuffix("/cancel").strip("/")
+                    self._send_json(asyncio.run(_cancel_work(config, work_id=work_id, payload=body)))
+                elif path.startswith("/api/dlq/") and path.endswith("/replay"):
+                    index = int(path.removeprefix("/api/dlq/").removesuffix("/replay").strip("/"))
+                    self._send_json(asyncio.run(_replay_dlq(config, index=index, payload=body)))
+                elif path.startswith("/api/dlq/") and path.endswith("/ack"):
+                    index = int(path.removeprefix("/api/dlq/").removesuffix("/ack").strip("/"))
+                    self._send_json(asyncio.run(_ack_dlq(config, index=index)))
+                else:
+                    self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+            except LookupError as exc:
+                self._send_json({"error": str(exc)}, status=404)
+            except ValueError as exc:
+                self._send_json({"error": str(exc)}, status=400)
+            except (BrokenPipeError, ConnectionResetError):
+                return
+            except Exception as exc:
+                self._send_json({"error": f"{exc.__class__.__name__}: {exc}"}, status=500)
+
         def log_message(self, fmt: str, *args: Any) -> None:
             return
+
+        def _read_json_body(self) -> dict[str, Any]:
+            length = int(self.headers.get("Content-Length") or 0)
+            if length <= 0:
+                return {}
+            raw = self.rfile.read(length).decode("utf-8")
+            if not raw.strip():
+                return {}
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                raise ValueError("JSON body must be an object")
+            return data
 
         def _send_static(self, ref: Any) -> None:
             content = ref.read_bytes()
@@ -208,6 +259,109 @@ async def _failed(config: ConsoleConfig, *, limit: int) -> dict[str, Any]:
         rows = await control.list_meta(state="failed", limit=max(1, min(limit, 200)), offset=0)
         dlq = await control.list_dlq(limit=max(1, min(limit, 200)), offset=0)
         return {"rows": rows, "dlq": dlq}
+    finally:
+        await redis.aclose()
+
+
+async def _retry_work(config: ConsoleConfig, *, work_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    from saq import Queue
+
+    redis, keys = await _with_redis(config)
+    queue = Queue.from_url(config.redis_url, name=config.queue_name)
+    try:
+        item = await RedisWorkItemStore(redis, keys=keys).get(work_id)
+        if not item:
+            raise LookupError(f"Work item not found: {work_id}")
+        delay_seconds = max(0, int(payload.get("delay_seconds") or 0))
+        timeout = int(payload.get("timeout") or 120)
+        retries = int(payload.get("retries") or 5)
+        step = str(payload.get("step") or "ui_retry")
+        control = RedisControlPlane(redis, keys=keys)
+        await RedisInflightStore(redis, keys=keys).clear(work_id)
+        await control.set_state(work_id=work_id, engine=item.engine, state="queued", step=step)
+        await queue.enqueue(
+            "work_step",
+            work_id=work_id,
+            scheduled=int(time.time() + delay_seconds) if delay_seconds else 0,
+            timeout=timeout,
+            retries=retries,
+        )
+        await control.push_event(
+            {
+                "kind": "work_retry_requested",
+                "work_id": work_id,
+                "engine": item.engine,
+                "source": "ui",
+                "delay_seconds": delay_seconds,
+            }
+        )
+        return {"ok": True, "work_id": work_id, "state": "queued"}
+    finally:
+        await redis.aclose()
+
+
+async def _cancel_work(config: ConsoleConfig, *, work_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    redis, keys = await _with_redis(config)
+    try:
+        item = await RedisWorkItemStore(redis, keys=keys).get(work_id)
+        if not item:
+            raise LookupError(f"Work item not found: {work_id}")
+        reason = str(payload.get("reason") or "ui_cancelled")
+        control = RedisControlPlane(redis, keys=keys)
+        await RedisInflightStore(redis, keys=keys).clear(work_id)
+        leases_cleared = await RedisLeaseManager(redis, keys=keys).clear(work_id)
+        resources_cleared = await RedisResourceManager(redis, keys=keys).clear(resources=item.resources)
+        meta = await control.set_state(work_id=work_id, engine=item.engine, state="cancelled", step=reason)
+        await control.push_event(
+            {
+                "kind": "work_cancelled",
+                "work_id": work_id,
+                "engine": item.engine,
+                "source": "ui",
+                "reason": reason,
+                "leases_cleared": leases_cleared,
+                "resources_cleared": resources_cleared,
+            }
+        )
+        return {"ok": True, "work_id": work_id, "state": "cancelled", "meta": meta}
+    finally:
+        await redis.aclose()
+
+
+async def _replay_dlq(config: ConsoleConfig, *, index: int, payload: dict[str, Any]) -> dict[str, Any]:
+    redis, keys = await _with_redis(config)
+    try:
+        control = RedisControlPlane(redis, keys=keys)
+        entry = await control.get_dlq(index)
+        if not entry:
+            raise LookupError(f"DLQ entry not found at index {index}")
+        work_id = str(entry.get("work_id") or "")
+        if not work_id:
+            raise LookupError(f"DLQ entry at index {index} does not include a work_id")
+    finally:
+        await redis.aclose()
+
+    result = await _retry_work(
+        config,
+        work_id=work_id,
+        payload={
+            **payload,
+            "step": payload.get("step") or "ui_dlq_replay",
+        },
+    )
+    if payload.get("ack", True):
+        ack = await _ack_dlq(config, index=index)
+        result["acked"] = bool(ack.get("acked"))
+    else:
+        result["acked"] = False
+    return result
+
+
+async def _ack_dlq(config: ConsoleConfig, *, index: int) -> dict[str, Any]:
+    redis, keys = await _with_redis(config)
+    try:
+        ok = await RedisControlPlane(redis, keys=keys).ack_dlq(index)
+        return {"ok": ok, "acked": ok, "index": index}
     finally:
         await redis.aclose()
 

@@ -91,6 +91,13 @@ Replay the first entry and remove it from the queue after it is enqueued:
 uv run roost dlq replay 0 --ack
 ```
 
+The local console exposes the same recovery actions in the work detail drawer
+and failed-work view:
+
+```bash
+uv run roost ui
+```
+
 ## Artifacts Are Missing
 
 Artifacts are stored on the local filesystem by default. The worker and the CLI
