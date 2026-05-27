@@ -9,6 +9,14 @@ from typing import Optional
 from redis import asyncio as aioredis
 
 from roost.runtime.models import Lease, Snapshot, WorkItem
+from roost.runtime.stores import (
+    ControlPlaneStore,
+    InflightStore,
+    LeaseStore,
+    ResourceStore,
+    SnapshotStore,
+    WorkItemStore,
+)
 
 
 def _now() -> float:
@@ -54,7 +62,7 @@ class RedisKeys:
         return f"{self.prefix}:events"
 
 
-class RedisLeaseManager:
+class RedisLeaseManager(LeaseStore):
     def __init__(self, redis: aioredis.Redis, keys: Optional[RedisKeys] = None):
         self.redis = redis
         self.keys = keys or RedisKeys()
@@ -103,7 +111,7 @@ class RedisLeaseManager:
         return int(await self.redis.delete(self.keys.lease(work_id)) or 0)
 
 
-class RedisResourceManager:
+class RedisResourceManager(ResourceStore):
     """
     Multi-resource claim system (best-effort isolation).
 
@@ -173,7 +181,7 @@ class RedisResourceManager:
         return int(await self.redis.delete(*keys) or 0)
 
 
-class RedisWorkItemStore:
+class RedisWorkItemStore(WorkItemStore):
     def __init__(self, redis: aioredis.Redis, keys: Optional[RedisKeys] = None):
         self.redis = redis
         self.keys = keys or RedisKeys()
@@ -206,7 +214,7 @@ class RedisWorkItemStore:
         return str(existing) if existing else item.work_id
 
 
-class RedisSnapshotStore:
+class RedisSnapshotStore(SnapshotStore):
     """
     Stores a single latest snapshot per work_id with optimistic versioning.
 
@@ -262,7 +270,7 @@ class RedisSnapshotStore:
         return res == 1
 
 
-class RedisInflightStore:
+class RedisInflightStore(InflightStore):
     def __init__(self, redis: aioredis.Redis, keys: Optional[RedisKeys] = None):
         self.redis = redis
         self.keys = keys or RedisKeys()
@@ -283,7 +291,7 @@ class RedisInflightStore:
             return None
 
 
-class RedisControlPlane:
+class RedisControlPlane(ControlPlaneStore):
     """
     Lightweight indexing + status store for operability.
 
