@@ -5,8 +5,15 @@ Roost releases should be boring and repeatable.
 ## Before Tagging
 
 - Confirm the version in `pyproject.toml`.
+- Update `CHANGELOG.md`.
 - Update the README if the public workflow changed.
 - Update `ROADMAP.md` if a phase gate moved.
+- Build package artifacts:
+
+```bash
+uv build
+```
+
 - Run unit tests:
 
 ```bash
@@ -50,4 +57,3 @@ Use this shape:
 ### Operational Notes
 - ...
 ```
-
