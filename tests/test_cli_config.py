@@ -111,3 +111,25 @@ def test_doctor_command_is_registered():
 
     assert args.cmd == "doctor"
     assert args.engines == "watchlist"
+
+
+def test_operator_recovery_commands_are_registered():
+    parser = build_parser()
+
+    inspect_args = parser.parse_args(["inspect", "work-1"])
+    retry_args = parser.parse_args(["retry", "work-1", "--delay-seconds", "5"])
+    cancel_args = parser.parse_args(["cancel", "work-1", "--reason", "operator_request"])
+    dlq_list_args = parser.parse_args(["dlq", "list", "--limit", "10"])
+    dlq_replay_args = parser.parse_args(["dlq", "replay", "0", "--ack"])
+    dlq_ack_args = parser.parse_args(["dlq", "ack", "0"])
+
+    assert inspect_args.cmd == "inspect"
+    assert retry_args.cmd == "retry"
+    assert retry_args.delay_seconds == 5
+    assert cancel_args.cmd == "cancel"
+    assert cancel_args.reason == "operator_request"
+    assert dlq_list_args.cmd == "dlq"
+    assert dlq_list_args.dlq_cmd == "list"
+    assert dlq_replay_args.dlq_cmd == "replay"
+    assert dlq_replay_args.ack is True
+    assert dlq_ack_args.dlq_cmd == "ack"

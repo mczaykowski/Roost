@@ -296,6 +296,200 @@ def _cmd_status(args: argparse.Namespace) -> None:
     asyncio.run(run())
 
 
+def _cmd_inspect(args: argparse.Namespace) -> None:
+    _apply_runtime_config(args)
+    _require_redis_deps()
+
+    from redis import asyncio as aioredis
+
+    from roost.runtime.backends.redis import (
+        RedisControlPlane,
+        RedisInflightStore,
+        RedisKeys,
+        RedisSnapshotStore,
+        RedisWorkItemStore,
+    )
+
+    async def run() -> None:
+        redis_prefix = apply_namespace(args.redis_prefix, args.namespace)
+        keys = RedisKeys(prefix=redis_prefix)
+        redis = aioredis.from_url(args.redis_url, decode_responses=True)
+        try:
+            control = RedisControlPlane(redis, keys=keys)
+            snapshots = RedisSnapshotStore(redis, keys=keys)
+            items = RedisWorkItemStore(redis, keys=keys)
+            inflight = RedisInflightStore(redis, keys=keys)
+            out = {
+                "meta": await control.get_meta(args.work_id),
+                "item": (await items.get(args.work_id)),
+                "snapshot": (await snapshots.load(args.work_id)),
+                "inflight": await inflight.get(args.work_id),
+                "lease_ttl_seconds": await redis.ttl(keys.lease(args.work_id)),
+            }
+            out["item"] = out["item"].model_dump(mode="json") if out["item"] else None
+            out["snapshot"] = out["snapshot"].model_dump(mode="json") if out["snapshot"] else None
+            print(json.dumps(out, indent=2, sort_keys=True, default=str))
+        finally:
+            await redis.aclose()
+
+    asyncio.run(run())
+
+
+def _cmd_retry(args: argparse.Namespace) -> None:
+    _apply_runtime_config(args)
+    _require_redis_deps()
+
+    from redis import asyncio as aioredis
+    from saq import Queue
+
+    from roost.runtime.backends.redis import RedisControlPlane, RedisInflightStore, RedisKeys, RedisWorkItemStore
+
+    async def run() -> None:
+        redis_prefix = apply_namespace(args.redis_prefix, args.namespace)
+        keys = RedisKeys(prefix=redis_prefix)
+        redis = aioredis.from_url(args.redis_url, decode_responses=True)
+        queue = Queue.from_url(args.redis_url, name=args.queue)
+        try:
+            item = await RedisWorkItemStore(redis, keys=keys).get(args.work_id)
+            if not item:
+                raise SystemExit(f"Work item not found: {args.work_id}")
+            control = RedisControlPlane(redis, keys=keys)
+            await RedisInflightStore(redis, keys=keys).clear(args.work_id)
+            await control.set_state(work_id=args.work_id, engine=item.engine, state="queued", step=args.step or "retry")
+            await queue.enqueue(
+                "work_step",
+                work_id=args.work_id,
+                scheduled=int(time.time() + args.delay_seconds) if args.delay_seconds else 0,
+                timeout=args.timeout,
+                retries=args.retries,
+            )
+            await control.push_event(
+                {
+                    "kind": "work_retry_requested",
+                    "work_id": args.work_id,
+                    "engine": item.engine,
+                    "delay_seconds": args.delay_seconds,
+                }
+            )
+            print(json.dumps({"work_id": args.work_id, "state": "queued"}, indent=2, sort_keys=True))
+        finally:
+            await redis.aclose()
+
+    asyncio.run(run())
+
+
+def _cmd_cancel(args: argparse.Namespace) -> None:
+    _apply_runtime_config(args)
+    _require_redis_deps()
+
+    from redis import asyncio as aioredis
+
+    from roost.runtime.backends.redis import (
+        RedisControlPlane,
+        RedisInflightStore,
+        RedisKeys,
+        RedisLeaseManager,
+        RedisResourceManager,
+        RedisWorkItemStore,
+    )
+
+    async def run() -> None:
+        redis_prefix = apply_namespace(args.redis_prefix, args.namespace)
+        keys = RedisKeys(prefix=redis_prefix)
+        redis = aioredis.from_url(args.redis_url, decode_responses=True)
+        try:
+            item = await RedisWorkItemStore(redis, keys=keys).get(args.work_id)
+            if not item:
+                raise SystemExit(f"Work item not found: {args.work_id}")
+            control = RedisControlPlane(redis, keys=keys)
+            await RedisInflightStore(redis, keys=keys).clear(args.work_id)
+            leases_cleared = await RedisLeaseManager(redis, keys=keys).clear(args.work_id)
+            resources_cleared = await RedisResourceManager(redis, keys=keys).clear(resources=item.resources)
+            meta = await control.set_state(
+                work_id=args.work_id,
+                engine=item.engine,
+                state="cancelled",
+                step=args.reason or "cancelled",
+            )
+            await control.push_event(
+                {
+                    "kind": "work_cancelled",
+                    "work_id": args.work_id,
+                    "engine": item.engine,
+                    "reason": args.reason,
+                    "leases_cleared": leases_cleared,
+                    "resources_cleared": resources_cleared,
+                }
+            )
+            print(json.dumps(meta, indent=2, sort_keys=True, default=str))
+        finally:
+            await redis.aclose()
+
+    asyncio.run(run())
+
+
+def _cmd_dlq(args: argparse.Namespace) -> None:
+    _apply_runtime_config(args)
+    _require_redis_deps()
+
+    from redis import asyncio as aioredis
+    from saq import Queue
+
+    from roost.runtime.backends.redis import RedisControlPlane, RedisInflightStore, RedisKeys, RedisWorkItemStore
+
+    async def run() -> None:
+        redis_prefix = apply_namespace(args.redis_prefix, args.namespace)
+        keys = RedisKeys(prefix=redis_prefix)
+        redis = aioredis.from_url(args.redis_url, decode_responses=True)
+        try:
+            control = RedisControlPlane(redis, keys=keys)
+            if args.dlq_cmd == "list":
+                rows = await control.list_dlq(limit=args.limit, offset=args.offset)
+                print(json.dumps(rows, indent=2, sort_keys=True, default=str))
+                return
+
+            entry = await control.get_dlq(args.index)
+            if not entry:
+                raise SystemExit(f"DLQ entry not found at index {args.index}")
+            work_id = str(entry.get("work_id") or "")
+            if not work_id:
+                raise SystemExit(f"DLQ entry at index {args.index} does not include a work_id")
+
+            if args.dlq_cmd == "ack":
+                ok = await control.ack_dlq(args.index)
+                print(json.dumps({"acked": ok, "index": args.index}, indent=2, sort_keys=True))
+                return
+
+            item = await RedisWorkItemStore(redis, keys=keys).get(work_id)
+            if not item:
+                raise SystemExit(f"Work item not found: {work_id}")
+            queue = Queue.from_url(args.redis_url, name=args.queue)
+            await RedisInflightStore(redis, keys=keys).clear(work_id)
+            await control.set_state(work_id=work_id, engine=item.engine, state="queued", step=args.step or "dlq_replay")
+            await queue.enqueue(
+                "work_step",
+                work_id=work_id,
+                scheduled=int(time.time() + args.delay_seconds) if args.delay_seconds else 0,
+                timeout=args.timeout,
+                retries=args.retries,
+            )
+            acked = await control.ack_dlq(args.index) if args.ack else False
+            await control.push_event(
+                {
+                    "kind": "dlq_replay_requested",
+                    "work_id": work_id,
+                    "engine": item.engine,
+                    "index": args.index,
+                    "acked": acked,
+                }
+            )
+            print(json.dumps({"work_id": work_id, "state": "queued", "acked": acked}, indent=2, sort_keys=True))
+        finally:
+            await redis.aclose()
+
+    asyncio.run(run())
+
+
 def _cmd_list(args: argparse.Namespace) -> None:
     _apply_runtime_config(args)
     _require_redis_deps()
@@ -566,6 +760,50 @@ def build_parser() -> argparse.ArgumentParser:
     _add_redis_args(p)
     p.add_argument("work_id")
     p.set_defaults(fn=_cmd_status)
+
+    p = sub.add_parser("inspect", help="Show work item, snapshot, inflight, and lease details")
+    _add_redis_args(p)
+    p.add_argument("work_id")
+    p.set_defaults(fn=_cmd_inspect)
+
+    p = sub.add_parser("retry", help="Re-enqueue existing work")
+    _add_redis_args(p)
+    p.add_argument("work_id")
+    p.add_argument("--delay-seconds", type=int, default=0)
+    p.add_argument("--timeout", type=int)
+    p.add_argument("--retries", type=int)
+    p.add_argument("--step")
+    p.set_defaults(fn=_cmd_retry)
+
+    p = sub.add_parser("cancel", help="Mark work as cancelled and clear local ownership markers")
+    _add_redis_args(p)
+    p.add_argument("work_id")
+    p.add_argument("--reason")
+    p.set_defaults(fn=_cmd_cancel)
+
+    p = sub.add_parser("dlq", help="List, replay, or acknowledge dead-lettered work")
+    dlq_sub = p.add_subparsers(dest="dlq_cmd", required=True)
+
+    dlq_list = dlq_sub.add_parser("list", help="List dead-letter entries")
+    _add_redis_args(dlq_list)
+    dlq_list.add_argument("--limit", type=int, default=50)
+    dlq_list.add_argument("--offset", type=int, default=0)
+    dlq_list.set_defaults(fn=_cmd_dlq)
+
+    dlq_replay = dlq_sub.add_parser("replay", help="Re-enqueue a dead-letter entry by index")
+    _add_redis_args(dlq_replay)
+    dlq_replay.add_argument("index", type=int)
+    dlq_replay.add_argument("--ack", action="store_true", help="Remove the DLQ entry after enqueueing")
+    dlq_replay.add_argument("--delay-seconds", type=int, default=0)
+    dlq_replay.add_argument("--timeout", type=int)
+    dlq_replay.add_argument("--retries", type=int)
+    dlq_replay.add_argument("--step")
+    dlq_replay.set_defaults(fn=_cmd_dlq)
+
+    dlq_ack = dlq_sub.add_parser("ack", help="Remove a dead-letter entry by index")
+    _add_redis_args(dlq_ack)
+    dlq_ack.add_argument("index", type=int)
+    dlq_ack.set_defaults(fn=_cmd_dlq)
 
     p = sub.add_parser("list", help="List recent work metadata")
     _add_redis_args(p)
