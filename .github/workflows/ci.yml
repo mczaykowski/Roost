@@ -14,7 +14,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v8
+        with:
+          enable-cache: "false"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -32,4 +34,3 @@ jobs:
 
       - name: Watchlist e2e
         run: scripts/e2e_watchlist.sh
-
