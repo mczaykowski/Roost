@@ -264,10 +264,18 @@ EVENTS_JSON="$(
     --redis-prefix "${REDIS_PREFIX}" \
     --limit 20
 )"
+WORKERS_JSON="$(
+  roost workers \
+    --runtime-mode production \
+    --postgres-url "${POSTGRES_URL}" \
+    --limit 20 \
+    --stale-after 30
+)"
 
 INSPECT_STATE="$(printf '%s' "${INSPECT_JSON}" | json_get 'print(d["meta"]["state"])')"
 LIST_MATCHES="$(printf '%s' "${LIST_JSON}" | WORK_ID="${WORK_ID}" python3 -c 'import json,os,sys; rows=json.load(sys.stdin); print(sum(1 for row in rows if row.get("work_id") == os.environ["WORK_ID"]))')"
 EVENT_MATCHES="$(printf '%s' "${EVENTS_JSON}" | WORK_ID="${WORK_ID}" python3 -c 'import json,os,sys; rows=json.load(sys.stdin); print(sum(1 for row in rows if row.get("work_id") == os.environ["WORK_ID"]))')"
+WORKER_MATCHES="$(printf '%s' "${WORKERS_JSON}" | python3 -c 'import json,sys; data=json.load(sys.stdin); print(sum(1 for row in data.get("rows", []) if not row.get("stale")))')"
 
 if [[ "${INSPECT_STATE}" != "done" ]]; then
   echo "Production inspect did not read done state" >&2
@@ -279,6 +287,10 @@ if [[ "${LIST_MATCHES}" -lt 1 ]]; then
 fi
 if [[ "${EVENT_MATCHES}" -lt 1 ]]; then
   echo "Production events did not include work events" >&2
+  exit 1
+fi
+if [[ "${WORKER_MATCHES}" -lt 1 ]]; then
+  echo "Production workers did not include an active worker" >&2
   exit 1
 fi
 
@@ -304,6 +316,7 @@ summary = get_json("/api/summary")
 work = get_json("/api/work?state=done&limit=20")
 detail = get_json(f"/api/work/{work_id}")
 events = get_json("/api/events?limit=20")
+workers = get_json("/api/workers?limit=20&stale_after=30")
 failed = get_json("/api/failed?limit=20")
 
 if summary.get("runtime_mode") != "production":
@@ -314,6 +327,8 @@ if (detail.get("meta") or {}).get("state") != "done":
     raise SystemExit("Console work detail did not read done state")
 if not any(row.get("work_id") == work_id for row in events.get("rows", [])):
     raise SystemExit("Console events did not include work events")
+if not any(not row.get("stale") for row in workers.get("rows", [])):
+    raise SystemExit("Console workers did not include an active worker")
 if "dlq" not in failed:
     raise SystemExit("Console failed endpoint did not return DLQ data")
 PY
@@ -337,7 +352,7 @@ PY
 
 echo "Final status: ${VERDICT} after ${FINAL_CHECKS} persisted observations"
 echo "Production inspect/list/events read from Postgres"
-echo "Production console APIs read from Postgres"
+echo "Production workers and console APIs read from Postgres"
 echo "Artifact metadata and worker heartbeat recorded in Postgres"
 echo "Artifact: ${ARTIFACT_ID}"
 echo

@@ -296,6 +296,9 @@ durable runtime state:
 scripts/e2e_postgres_watchlist.sh
 ```
 
+For a production-shaped local setup with Docker Compose, see
+`examples/production/`.
+
 ## How It Differs
 
 Roost is not a replacement for LangChain, LlamaIndex, CrewAI, AutoGen,

@@ -81,6 +81,10 @@ def _build_handler(config: ConsoleConfig) -> type[BaseHTTPRequestHandler]:
                 elif path == "/api/events":
                     limit = _int_query(query, "limit", 80)
                     self._send_json(asyncio.run(_events(config, limit=limit)))
+                elif path == "/api/workers":
+                    limit = _int_query(query, "limit", 100)
+                    stale_after = _int_query(query, "stale_after", 30)
+                    self._send_json(asyncio.run(_workers(config, limit=limit, stale_after_seconds=stale_after)))
                 elif path == "/api/failed":
                     limit = _int_query(query, "limit", 50)
                     self._send_json(asyncio.run(_failed(config, limit=limit)))
@@ -342,6 +346,31 @@ async def _failed(config: ConsoleConfig, *, limit: int) -> dict[str, Any]:
         if postgres:
             await postgres.close()
         await redis.aclose()
+
+
+async def _workers(config: ConsoleConfig, *, limit: int, stale_after_seconds: int) -> dict[str, Any]:
+    if not _production_mode(config):
+        return {
+            "runtime_mode": config.runtime_mode,
+            "stale_after_seconds": stale_after_seconds,
+            "rows": [],
+        }
+
+    postgres = await _with_postgres(config)
+    try:
+        from roost.runtime.backends.postgres import PostgresWorkerHeartbeatStore
+
+        rows = await PostgresWorkerHeartbeatStore(postgres).list_workers(
+            limit=max(1, min(limit, 500)),
+            stale_after_seconds=max(1, stale_after_seconds),
+        )
+        return {
+            "runtime_mode": config.runtime_mode,
+            "stale_after_seconds": stale_after_seconds,
+            "rows": rows,
+        }
+    finally:
+        await postgres.close()
 
 
 async def _retry_work(config: ConsoleConfig, *, work_id: str, payload: dict[str, Any]) -> dict[str, Any]:

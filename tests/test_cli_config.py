@@ -171,6 +171,9 @@ def test_operator_recovery_commands_are_registered():
     events_args = parser.parse_args(
         ["events", "--runtime-mode", "production", "--postgres-url", "postgresql://localhost/roost"]
     )
+    workers_args = parser.parse_args(
+        ["workers", "--runtime-mode", "production", "--postgres-url", "postgresql://localhost/roost"]
+    )
 
     assert inspect_args.cmd == "inspect"
     assert retry_args.cmd == "retry"
@@ -184,6 +187,8 @@ def test_operator_recovery_commands_are_registered():
     assert dlq_ack_args.dlq_cmd == "ack"
     assert list_args.runtime_mode == "production"
     assert events_args.postgres_url == "postgresql://localhost/roost"
+    assert workers_args.cmd == "workers"
+    assert workers_args.stale_after == 30
 
 
 def test_migrate_plan_prints_packaged_migrations(capsys):

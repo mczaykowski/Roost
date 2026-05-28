@@ -3,6 +3,7 @@ const state = {
   filter: "",
   search: "",
   workRows: [],
+  workerRows: [],
   detail: null,
 };
 
@@ -89,13 +90,21 @@ async function refresh() {
     renderWork();
     renderEvents(events.rows || []);
     renderFailed(failed.rows || [], failed.dlq || []);
+    if (summary.runtime_mode === "production") {
+      const workers = await getJson("/api/workers?limit=120&stale_after=30");
+      state.workerRows = workers.rows || [];
+    } else {
+      state.workerRows = [];
+    }
+    renderWorkers(summary.runtime_mode || "simple");
   } catch (err) {
     setConnection("Offline", err.message);
   }
 }
 
 function renderSummary(summary) {
-  setConnection(summary.queue || "default", summary.prefix || "roost");
+  const mode = summary.runtime_mode === "production" ? "production" : "simple";
+  setConnection(`${summary.queue || "default"} / ${mode}`, summary.prefix || "roost");
   $("#statTotal").textContent = summary.total ?? 0;
   $("#statRunning").textContent = summary.states?.running ?? 0;
   $("#statQueued").textContent = summary.states?.queued ?? 0;
@@ -185,6 +194,55 @@ function renderEvents(rows) {
       `,
     )
     .join("");
+}
+
+function renderWorkers(runtimeMode) {
+  if (runtimeMode !== "production") {
+    $("#workerRows").innerHTML = `
+      <tr class="empty-row">
+        <td colspan="6">
+          <div class="empty">Worker heartbeats are available in production mode.</div>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  const rows = state.workerRows;
+  if (!rows.length) {
+    $("#workerRows").innerHTML = `
+      <tr class="empty-row">
+        <td colspan="6">
+          <div class="empty">No workers found.</div>
+        </td>
+      </tr>
+    `;
+    return;
+  }
+  $("#workerRows").innerHTML = rows
+    .map((row) => {
+      const metadata = row.metadata || {};
+      const engines = (row.engine_ids || []).join(", ") || "-";
+      return `
+        <tr>
+          <td>${workerPill(row)}</td>
+          <td>
+            <span class="cell-main mono">${shortId(row.worker_id)}</span>
+            <span class="cell-meta">${metadata.concurrency ? `${metadata.concurrency} slots` : "worker"}</span>
+          </td>
+          <td>${engines}</td>
+          <td>${row.queue_name || "-"}</td>
+          <td>${prettyTime(row.last_seen_at)}</td>
+          <td>${metadata.runtime_mode || "production"}</td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function workerPill(row) {
+  return row.stale
+    ? `<span class="state-pill state-failed">Stale</span>`
+    : `<span class="state-pill state-done">Active</span>`;
 }
 
 function eventText(row) {
@@ -362,7 +420,7 @@ function renderArtifacts(artifacts) {
 function setView(nextView) {
   state.view = nextView;
   $$(".nav-item").forEach((item) => item.classList.toggle("is-active", item.dataset.view === nextView));
-  ["work", "events", "failed"].forEach((name) => {
+  ["work", "workers", "events", "failed"].forEach((name) => {
     $(`#${name}View`).classList.toggle("is-visible", name === nextView);
   });
 }
