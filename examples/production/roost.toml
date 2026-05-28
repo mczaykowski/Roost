@@ -1,0 +1,23 @@
+[runtime]
+mode = "production"
+
+[redis]
+url = "redis://localhost:6379/0"
+queue = "default"
+prefix = "roost-prod"
+namespace = "local/prod"
+
+[postgres]
+url = "postgresql://roost:roost@localhost:5432/roost"
+
+[worker]
+engines = "watchlist"
+concurrency = 2
+timeout_seconds = 120
+retries = 5
+lease_ttl_seconds = 60
+workspace_root = ".roost/workspaces"
+workspace_mode = "worktree"
+
+[artifacts]
+root = ".roost/artifacts"

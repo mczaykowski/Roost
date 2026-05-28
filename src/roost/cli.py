@@ -713,6 +713,50 @@ def _cmd_events(args: argparse.Namespace) -> None:
     asyncio.run(run())
 
 
+def _cmd_workers(args: argparse.Namespace) -> None:
+    _apply_runtime_config(args)
+
+    async def run() -> None:
+        if args.runtime_mode != "production":
+            print(
+                json.dumps(
+                    {
+                        "runtime_mode": args.runtime_mode,
+                        "stale_after_seconds": args.stale_after,
+                        "rows": [],
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return
+
+        _require_postgres_runtime(args)
+        import psycopg
+
+        from roost.runtime.backends.postgres import PostgresWorkerHeartbeatStore
+
+        async with await psycopg.AsyncConnection.connect(args.postgres_url) as postgres:
+            rows = await PostgresWorkerHeartbeatStore(postgres).list_workers(
+                limit=args.limit,
+                stale_after_seconds=args.stale_after,
+            )
+        print(
+            json.dumps(
+                {
+                    "runtime_mode": args.runtime_mode,
+                    "stale_after_seconds": args.stale_after,
+                    "rows": rows,
+                },
+                indent=2,
+                sort_keys=True,
+                default=str,
+            )
+        )
+
+    asyncio.run(run())
+
+
 def _cmd_workspace_path(args: argparse.Namespace) -> None:
     _apply_runtime_config(args)
     from roost.runtime.workspaces import WorkspaceManager, WorkspaceSpec
@@ -1072,6 +1116,12 @@ def build_parser() -> argparse.ArgumentParser:
     _add_redis_args(p, production=True)
     p.add_argument("--limit", type=int, default=50)
     p.set_defaults(fn=_cmd_events)
+
+    p = sub.add_parser("workers", help="List worker heartbeats")
+    _add_postgres_args(p)
+    p.add_argument("--limit", type=int, default=100)
+    p.add_argument("--stale-after", type=int, default=30)
+    p.set_defaults(fn=_cmd_workers)
 
     p = sub.add_parser("workspace-path", help="Print the isolated workspace path for a work id")
     _add_config_arg(p)

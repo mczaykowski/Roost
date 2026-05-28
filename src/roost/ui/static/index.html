@@ -15,6 +15,7 @@
         </a>
         <nav class="nav" aria-label="Primary">
           <button class="nav-item is-active" data-view="work">Work</button>
+          <button class="nav-item" data-view="workers">Workers</button>
           <button class="nav-item" data-view="events">Events</button>
           <button class="nav-item" data-view="failed">Failed</button>
         </nav>
@@ -106,6 +107,30 @@
             </div>
           </div>
           <div class="event-list" id="eventRows"></div>
+        </section>
+
+        <section class="panel" id="workersView" aria-labelledby="workersTitle">
+          <div class="panel-head">
+            <div>
+              <p class="section-kicker"><span class="live-dot"></span>Workers</p>
+              <h2 id="workersTitle">Registered workers</h2>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Worker</th>
+                  <th>Engines</th>
+                  <th>Queue</th>
+                  <th>Last seen</th>
+                  <th>Runtime</th>
+                </tr>
+              </thead>
+              <tbody id="workerRows"></tbody>
+            </table>
+          </div>
         </section>
 
         <section class="panel" id="failedView" aria-labelledby="failedTitle">
