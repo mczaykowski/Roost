@@ -24,7 +24,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: uv sync --extra redis --extra dev
+        run: uv sync --extra redis --extra postgres --extra dev
 
       - name: Lint
         run: uv run --extra dev ruff check .
@@ -34,3 +34,9 @@ jobs:
 
       - name: Watchlist e2e
         run: scripts/e2e_watchlist.sh
+
+      - name: Postgres migration e2e
+        run: scripts/e2e_postgres_migrate.sh
+
+      - name: Postgres production e2e
+        run: scripts/e2e_postgres_watchlist.sh

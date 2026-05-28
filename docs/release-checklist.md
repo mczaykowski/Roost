@@ -14,6 +14,24 @@ Roost releases should be boring and repeatable.
 uv build
 ```
 
+- If migrations changed, inspect the packaged migration plan:
+
+```bash
+uv run roost migrate --plan
+```
+
+- If migration behavior changed, run the local Postgres e2e:
+
+```bash
+scripts/e2e_postgres_migrate.sh
+```
+
+- If production runtime behavior changed, run the Postgres-backed watchlist e2e:
+
+```bash
+scripts/e2e_postgres_watchlist.sh
+```
+
 - Run unit tests:
 
 ```bash

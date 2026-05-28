@@ -258,6 +258,7 @@ uv run roost dlq list
 uv run roost dlq replay 0 --ack
 uv run roost artifact-show <artifact_id> --ext json
 uv run roost ui
+uv run roost migrate --plan
 uv run roost workspace-path <work_id>
 ```
 
@@ -268,9 +269,32 @@ Useful environment variables:
 - `ROOST_REDIS_PREFIX`
 - `ROOST_NAMESPACE`
 - `ROOST_ARTIFACT_ROOT`
+- `ROOST_POSTGRES_URL`
 
 `roost.toml` uses the same settings in file form. CLI flags override
 environment variables, and environment variables override `roost.toml`.
+
+Postgres durable storage is being introduced behind explicit production-mode
+commands for work items, snapshots, leases, resource claims, events, DLQ, and
+operator metadata, plus artifact metadata and worker heartbeats. To inspect
+packaged migrations:
+
+```bash
+uv run roost migrate --plan
+```
+
+To test migrations against a disposable local Postgres container:
+
+```bash
+scripts/e2e_postgres_migrate.sh
+```
+
+To test production mode end-to-end with Redis for queueing and Postgres for
+durable runtime state:
+
+```bash
+scripts/e2e_postgres_watchlist.sh
+```
 
 ## How It Differs
 

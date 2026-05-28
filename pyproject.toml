@@ -18,6 +18,9 @@ redis = [
   "redis>=5.0",
   "saq>=0.12",
 ]
+postgres = [
+  "psycopg[binary]>=3.2",
+]
 metrics = [
   "prometheus-client>=0.20",
 ]

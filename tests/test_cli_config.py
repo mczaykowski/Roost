@@ -12,7 +12,9 @@ def test_init_writes_minimal_roost_toml(tmp_path):
 
     content = path.read_text(encoding="utf-8")
     assert "[redis]" in content
+    assert "[runtime]" in content
     assert 'url = "redis://localhost:6379/0"' in content
+    assert "[postgres]" in content
     assert "[worker]" in content
     assert 'engines = "watchlist"' in content
     assert "[artifacts]" in content
@@ -32,6 +34,12 @@ url = "redis://localhost:6381/0"
 queue = "critical"
 prefix = "roost-test"
 namespace = "acme/dev"
+
+[runtime]
+mode = "production"
+
+[postgres]
+url = "postgresql://localhost/roost_test"
 
 [worker]
 engines = "demo,watchlist"
@@ -64,6 +72,18 @@ root = ".roost/artifacts"
     assert args.workspace_mode == "clone"
     assert args.workspace_root == str(tmp_path / ".roost" / "workspaces")
     assert args.artifact_root == str(tmp_path / ".roost" / "artifacts")
+    assert args.runtime_mode == "production"
+    assert args.postgres_url == "postgresql://localhost/roost_test"
+
+    status_args = parser.parse_args(["status", "--config", str(path), "work-1"])
+    _apply_runtime_config(status_args)
+    assert status_args.runtime_mode == "production"
+    assert status_args.postgres_url == "postgresql://localhost/roost_test"
+
+    migrate_args = parser.parse_args(["migrate", "--config", str(path), "--repo-path", str(tmp_path)])
+    _apply_runtime_config(migrate_args)
+    assert migrate_args.runtime_mode == "production"
+    assert migrate_args.postgres_url == "postgresql://localhost/roost_test"
 
 
 def test_cli_flags_override_config_file(tmp_path):
@@ -107,10 +127,30 @@ concurrency = 2
 
 def test_doctor_command_is_registered():
     parser = build_parser()
-    args = parser.parse_args(["doctor", "--engines", "watchlist"])
+    args = parser.parse_args(
+        [
+            "doctor",
+            "--engines",
+            "watchlist",
+            "--runtime-mode",
+            "production",
+            "--postgres-url",
+            "postgresql://localhost/roost",
+        ]
+    )
 
     assert args.cmd == "doctor"
     assert args.engines == "watchlist"
+    assert args.runtime_mode == "production"
+    assert args.postgres_url == "postgresql://localhost/roost"
+
+
+def test_migrate_command_is_registered():
+    parser = build_parser()
+    args = parser.parse_args(["migrate", "--plan"])
+
+    assert args.cmd == "migrate"
+    assert args.plan is True
 
 
 def test_operator_recovery_commands_are_registered():
@@ -122,6 +162,10 @@ def test_operator_recovery_commands_are_registered():
     dlq_list_args = parser.parse_args(["dlq", "list", "--limit", "10"])
     dlq_replay_args = parser.parse_args(["dlq", "replay", "0", "--ack"])
     dlq_ack_args = parser.parse_args(["dlq", "ack", "0"])
+    list_args = parser.parse_args(["list", "--runtime-mode", "production", "--postgres-url", "postgresql://localhost/roost"])
+    events_args = parser.parse_args(
+        ["events", "--runtime-mode", "production", "--postgres-url", "postgresql://localhost/roost"]
+    )
 
     assert inspect_args.cmd == "inspect"
     assert retry_args.cmd == "retry"
@@ -133,3 +177,16 @@ def test_operator_recovery_commands_are_registered():
     assert dlq_replay_args.dlq_cmd == "replay"
     assert dlq_replay_args.ack is True
     assert dlq_ack_args.dlq_cmd == "ack"
+    assert list_args.runtime_mode == "production"
+    assert events_args.postgres_url == "postgresql://localhost/roost"
+
+
+def test_migrate_plan_prints_packaged_migrations(capsys):
+    parser = build_parser()
+    args = parser.parse_args(["migrate", "--plan"])
+
+    args.fn(args)
+
+    out = capsys.readouterr().out
+    assert "0001" in out
+    assert "0001_initial.sql" in out

@@ -258,6 +258,12 @@ root = ".roost/artifacts"
 Production mode should fail loudly if Postgres is missing or migrations are not
 applied.
 
+The first implementation step is intentionally narrow: package Postgres
+migrations, expose `roost migrate`, and implement durable work item, snapshot,
+artifact metadata, lease, resource claim, worker heartbeat, and control-plane
+stores while keeping Redis as the default runtime. The local migration smoke test is
+`scripts/e2e_postgres_migrate.sh`.
+
 ## Decision
 
 Roost should keep Redis as the default local runtime and add Postgres as the
@@ -270,4 +276,3 @@ Redis helps Roost keep moving.
 Postgres helps humans understand what happened.
 Object storage keeps the evidence.
 ```
-

@@ -42,9 +42,12 @@ class SwarmConfig:
     redis_url: str
     queue_name: str = "default"
     redis_prefix: str = "roost"
+    runtime_mode: str = "simple"
+    postgres_url: Optional[str] = None
 
     lease_ttl_seconds: int = 60
     inflight_ttl_seconds: int = 120
+    worker_heartbeat_interval_seconds: float = 10.0
     recovery_interval_seconds: float = 2.0
     stale_after_seconds: float = 30.0
     resource_ttl_seconds: int = 60
@@ -75,9 +78,11 @@ class _RedisSwarmRuntime:
 
         self.redis = aioredis.from_url(config.redis_url, decode_responses=True)
         self.queue = Queue.from_url(config.redis_url, name=config.queue_name)
+        self._postgres_conn: Any = None
+        self._store_init_lock = asyncio.Lock()
 
         self.keys = RedisKeys(prefix=config.redis_prefix)
-        self.stores = RuntimeStores(
+        self._redis_stores = RuntimeStores(
             work_items=RedisWorkItemStore(self.redis, keys=self.keys),
             snapshots=RedisSnapshotStore(self.redis, keys=self.keys),
             leases=RedisLeaseManager(self.redis, keys=self.keys),
@@ -85,6 +90,12 @@ class _RedisSwarmRuntime:
             inflight=RedisInflightStore(self.redis, keys=self.keys),
             control=RedisControlPlane(self.redis, keys=self.keys),
         )
+        self.stores = self._redis_stores
+        self.artifacts: Any = None
+        self.workers: Any = None
+        self._activate_stores(self.stores)
+
+    def _activate_stores(self, stores: RuntimeStores) -> None:
         self.leases: LeaseStore = self.stores.leases
         self.resources: ResourceStore = self.stores.resources
         self.work_items: WorkItemStore = self.stores.work_items
@@ -92,7 +103,46 @@ class _RedisSwarmRuntime:
         self.inflight: InflightStore = self.stores.inflight
         self.control: ControlPlaneStore = self.stores.control
 
+    def _production_mode(self) -> bool:
+        return self.config.runtime_mode == "production"
+
+    async def _ensure_runtime_stores(self) -> None:
+        if not self._production_mode() or self._postgres_conn is not None:
+            return
+
+        async with self._store_init_lock:
+            if self._postgres_conn is not None:
+                return
+            if not self.config.postgres_url:
+                raise RuntimeError("Postgres URL is required when runtime_mode='production'")
+            try:
+                import psycopg
+
+                from roost.runtime.backends.postgres import build_postgres_durable_stores
+            except Exception as exc:
+                raise RuntimeError(
+                    "Missing Postgres runtime dependency. Install with:\n"
+                    "  uv sync --extra postgres"
+                ) from exc
+
+            self._postgres_conn = await psycopg.AsyncConnection.connect(self.config.postgres_url)
+            durable = build_postgres_durable_stores(self._postgres_conn)
+            self.artifacts = durable.artifacts
+            self.workers = durable.workers
+            self.stores = RuntimeStores(
+                work_items=durable.work_items,
+                snapshots=durable.snapshots,
+                leases=durable.leases,
+                resources=durable.resources,
+                inflight=self._redis_stores.inflight,
+                control=durable.control,
+            )
+            self._activate_stores(self.stores)
+
     async def close(self) -> None:
+        if self._postgres_conn is not None:
+            await self._postgres_conn.close()
+            self._postgres_conn = None
         await self.redis.aclose()
 
     def _scheduled_after(self, delay_seconds: float) -> int:
@@ -119,6 +169,7 @@ class _RedisSwarmRuntime:
         return max(1, int(self.config.job_timeout_seconds))
 
     async def enqueue(self, item: WorkItem, delay_seconds: int = 0) -> str:
+        await self._ensure_runtime_stores()
         work_id = await self.work_items.get_or_claim_work_id(item, ttl_seconds=self.config.work_item_ttl_seconds)
         await self.control.upsert_on_enqueue(item, work_id)
         await self.queue.enqueue(
@@ -291,6 +342,10 @@ class _RedisSwarmRuntime:
                 )
                 return {"status": "retry", "reason": "version_conflict", "job_id": job_id}
 
+            if self.artifacts:
+                for artifact in new_snapshot.artifacts:
+                    await self.artifacts.put(artifact)
+
             if new_snapshot.is_finished:
                 await self._eval_triggers(work_id=work_id, item=item, snapshot=new_snapshot)
 
@@ -373,6 +428,8 @@ class _RedisSwarmRuntime:
             )
 
     async def run_worker(self, *, concurrency: int = 10) -> None:
+        await self._ensure_runtime_stores()
+
         async def work_step(ctx: Dict[str, Any], work_id: str, **_kwargs: Any) -> Dict[str, Any]:
             job = ctx.get("job")
             job_attempt = int(getattr(job, "attempts", 1) or 1)
@@ -399,15 +456,36 @@ class _RedisSwarmRuntime:
                 finally:
                     await asyncio.sleep(self.config.recovery_interval_seconds)
 
+        async def heartbeat_loop() -> None:
+            while True:
+                if self.workers:
+                    await self.workers.heartbeat(
+                        worker_id=self.worker_id,
+                        engine_ids=self._worker_engine_ids(),
+                        queue_name=self.config.queue_name,
+                        metadata={
+                            "runtime_mode": self.config.runtime_mode,
+                            "redis_prefix": self.config.redis_prefix,
+                            "concurrency": concurrency,
+                        },
+                    )
+                await asyncio.sleep(max(1.0, self.config.worker_heartbeat_interval_seconds))
+
         recovery_task = asyncio.create_task(recovery_loop())
+        heartbeat_task = asyncio.create_task(heartbeat_loop()) if self.workers else None
         try:
             await worker.start()
         finally:
             recovery_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await recovery_task
+            if heartbeat_task:
+                heartbeat_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await heartbeat_task
 
     async def recover_orphans_once(self) -> int:
+        await self._ensure_runtime_stores()
         now = time.time()
         recovered = 0
 
@@ -430,7 +508,7 @@ class _RedisSwarmRuntime:
                 continue
 
             # If the lease still exists, assume a slow worker is alive.
-            if await self.redis.exists(self.keys.lease(work_id)):
+            if await self._lease_is_active(work_id):
                 continue
 
             snap = await self.snapshots.load(work_id)
@@ -449,6 +527,15 @@ class _RedisSwarmRuntime:
             recovered += 1
 
         return recovered
+
+    async def _lease_is_active(self, work_id: str) -> bool:
+        is_active = getattr(self.leases, "is_active", None)
+        if is_active:
+            return bool(await is_active(work_id))
+        return bool(await self.redis.exists(self.keys.lease(work_id)))
+
+    def _worker_engine_ids(self) -> list[str]:
+        return []
 
     async def _eval_triggers(self, *, work_id: str, item: WorkItem, snapshot: Any) -> None:
         if not self.config.roost_config or not self.config.roost_config.triggers:
@@ -502,6 +589,9 @@ class RedisSwarm(_RedisSwarmRuntime):
     def __init__(self, engine: Engine, *, config: SwarmConfig, worker_id: Optional[str] = None):
         super().__init__(config=config, worker_id=worker_id)
         self.engine = engine
+
+    def _worker_engine_ids(self) -> list[str]:
+        return [self.engine.engine_id]
 
     async def _execute_one_step(
         self,
@@ -565,6 +655,9 @@ class RedisUniversalSwarm(_RedisSwarmRuntime):
     def __init__(self, engines: Mapping[str, Engine], *, config: SwarmConfig, worker_id: Optional[str] = None):
         super().__init__(config=config, worker_id=worker_id)
         self.engines: Dict[str, Engine] = dict(engines)
+
+    def _worker_engine_ids(self) -> list[str]:
+        return sorted(self.engines)
 
     async def _execute_one_step(
         self,

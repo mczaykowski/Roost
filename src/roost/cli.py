@@ -12,6 +12,7 @@ from roost.runtime.config import (
     DEFAULT_QUEUE,
     DEFAULT_REDIS_PREFIX,
     DEFAULT_REDIS_URL,
+    DEFAULT_RUNTIME_MODE,
     DEFAULT_WORKSPACE_MODE,
     load_roost_config,
     resolve_config_relative_path,
@@ -32,12 +33,33 @@ def _missing_redis_deps() -> list[str]:
     return missing
 
 
+def _missing_postgres_deps() -> list[str]:
+    missing = []
+    try:
+        __import__("psycopg")
+    except Exception:
+        missing.append("psycopg")
+    return missing
+
+
 def _require_redis_deps() -> None:
     missing = _missing_redis_deps()
     if missing:
         raise SystemExit(
             "Missing Redis runtime dependencies. Install with:\n"
             "  uv sync --extra redis\n"
+            f"Missing: {', '.join(missing)}"
+        )
+
+
+def _require_postgres_runtime(args: argparse.Namespace) -> None:
+    if not getattr(args, "postgres_url", None):
+        raise SystemExit("Postgres URL is required for production mode")
+    missing = _missing_postgres_deps()
+    if missing:
+        raise SystemExit(
+            "Missing Postgres runtime dependencies. Install with:\n"
+            "  uv sync --extra postgres\n"
             f"Missing: {', '.join(missing)}"
         )
 
@@ -69,6 +91,14 @@ def _apply_runtime_config(args: argparse.Namespace) -> argparse.Namespace:
     args.config_path = config_path
     args.roost_config = config
 
+    if hasattr(args, "runtime_mode"):
+        args.runtime_mode = _choose(args.runtime_mode, config.runtime.mode if config else None, DEFAULT_RUNTIME_MODE)
+    if hasattr(args, "postgres_url"):
+        args.postgres_url = _choose(
+            args.postgres_url,
+            os.getenv("ROOST_POSTGRES_URL"),
+            config.postgres.url if config else None,
+        )
     if hasattr(args, "redis_url"):
         args.redis_url = _choose(
             args.redis_url,
@@ -123,14 +153,21 @@ def _apply_runtime_config(args: argparse.Namespace) -> argparse.Namespace:
 
 def _roost_toml_template(args: argparse.Namespace) -> str:
     namespace = f'namespace = "{args.namespace}"\n' if args.namespace else "# namespace = \"dev\"\n"
+    postgres_url = f'url = "{args.postgres_url}"\n' if args.postgres_url else '# url = "postgresql://localhost/roost"\n'
     return f"""# Roost runtime configuration.
 # CLI flags override environment variables; environment variables override this file.
+
+[runtime]
+mode = "{args.runtime_mode}"
 
 [redis]
 url = "{args.redis_url}"
 queue = "{args.queue}"
 prefix = "{args.redis_prefix}"
 {namespace}
+[postgres]
+{postgres_url}
+
 [worker]
 engines = "{args.engines}"
 concurrency = {args.concurrency}
@@ -179,8 +216,22 @@ def _cmd_enqueue(args: argparse.Namespace) -> None:
         redis_prefix = apply_namespace(args.redis_prefix, args.namespace)
         keys = RedisKeys(prefix=redis_prefix)
         redis = aioredis.from_url(args.redis_url, decode_responses=True)
+        postgres = None
         queue = Queue.from_url(args.redis_url, name=args.queue)
         try:
+            if args.runtime_mode == "production":
+                _require_postgres_runtime(args)
+                import psycopg
+
+                from roost.runtime.backends.postgres import PostgresControlPlaneStore, PostgresWorkItemStore
+
+                postgres = await psycopg.AsyncConnection.connect(args.postgres_url)
+                store = PostgresWorkItemStore(postgres)
+                control = PostgresControlPlaneStore(postgres)
+            else:
+                store = RedisWorkItemStore(redis, keys=keys)
+                control = RedisControlPlane(redis, keys=keys)
+
             payload = _json_loads(args.payload)
             work_id = args.work_id or uuid.uuid4().hex
             item = WorkItem(
@@ -191,8 +242,6 @@ def _cmd_enqueue(args: argparse.Namespace) -> None:
                 resources=list(args.resource or []),
                 idempotency_key=args.idempotency_key,
             )
-            store = RedisWorkItemStore(redis, keys=keys)
-            control = RedisControlPlane(redis, keys=keys)
             canonical_id = await store.get_or_claim_work_id(item)
             await control.upsert_on_enqueue(item, canonical_id)
             await queue.enqueue(
@@ -204,6 +253,8 @@ def _cmd_enqueue(args: argparse.Namespace) -> None:
             )
             print(canonical_id)
         finally:
+            if postgres:
+                await postgres.close()
             await redis.aclose()
 
     asyncio.run(run())
@@ -248,6 +299,8 @@ def _cmd_worker(args: argparse.Namespace) -> None:
             redis_url=args.redis_url,
             queue_name=args.queue,
             redis_prefix=redis_prefix,
+            runtime_mode=args.runtime_mode,
+            postgres_url=args.postgres_url,
             lease_ttl_seconds=args.lease_ttl,
             job_timeout_seconds=args.timeout,
             job_retries=args.retries,
@@ -278,10 +331,27 @@ def _cmd_status(args: argparse.Namespace) -> None:
         redis_prefix = apply_namespace(args.redis_prefix, args.namespace)
         keys = RedisKeys(prefix=redis_prefix)
         redis = aioredis.from_url(args.redis_url, decode_responses=True)
+        postgres = None
         try:
-            control = RedisControlPlane(redis, keys=keys)
-            snapshots = RedisSnapshotStore(redis, keys=keys)
-            items = RedisWorkItemStore(redis, keys=keys)
+            if args.runtime_mode == "production":
+                _require_postgres_runtime(args)
+                import psycopg
+
+                from roost.runtime.backends.postgres import (
+                    PostgresControlPlaneStore,
+                    PostgresSnapshotStore,
+                    PostgresWorkItemStore,
+                )
+
+                postgres = await psycopg.AsyncConnection.connect(args.postgres_url)
+                control = PostgresControlPlaneStore(postgres)
+                snapshots = PostgresSnapshotStore(postgres)
+                items = PostgresWorkItemStore(postgres)
+            else:
+                control = RedisControlPlane(redis, keys=keys)
+                snapshots = RedisSnapshotStore(redis, keys=keys)
+                items = RedisWorkItemStore(redis, keys=keys)
+
             item = await items.get(args.work_id)
             snapshot = await snapshots.load(args.work_id)
             out = {
@@ -291,6 +361,8 @@ def _cmd_status(args: argparse.Namespace) -> None:
             }
             print(json.dumps(out, indent=2, sort_keys=True, default=str))
         finally:
+            if postgres:
+                await postgres.close()
             await redis.aclose()
 
     asyncio.run(run())
@@ -314,22 +386,45 @@ def _cmd_inspect(args: argparse.Namespace) -> None:
         redis_prefix = apply_namespace(args.redis_prefix, args.namespace)
         keys = RedisKeys(prefix=redis_prefix)
         redis = aioredis.from_url(args.redis_url, decode_responses=True)
+        postgres = None
         try:
-            control = RedisControlPlane(redis, keys=keys)
-            snapshots = RedisSnapshotStore(redis, keys=keys)
-            items = RedisWorkItemStore(redis, keys=keys)
+            if args.runtime_mode == "production":
+                _require_postgres_runtime(args)
+                import psycopg
+
+                from roost.runtime.backends.postgres import (
+                    PostgresControlPlaneStore,
+                    PostgresLeaseStore,
+                    PostgresSnapshotStore,
+                    PostgresWorkItemStore,
+                )
+
+                postgres = await psycopg.AsyncConnection.connect(args.postgres_url)
+                control = PostgresControlPlaneStore(postgres)
+                snapshots = PostgresSnapshotStore(postgres)
+                items = PostgresWorkItemStore(postgres)
+                lease_detail: int | bool = await PostgresLeaseStore(postgres).is_active(args.work_id)
+                lease_key = "lease_active"
+            else:
+                control = RedisControlPlane(redis, keys=keys)
+                snapshots = RedisSnapshotStore(redis, keys=keys)
+                items = RedisWorkItemStore(redis, keys=keys)
+                lease_detail = await redis.ttl(keys.lease(args.work_id))
+                lease_key = "lease_ttl_seconds"
             inflight = RedisInflightStore(redis, keys=keys)
             out = {
                 "meta": await control.get_meta(args.work_id),
                 "item": (await items.get(args.work_id)),
                 "snapshot": (await snapshots.load(args.work_id)),
                 "inflight": await inflight.get(args.work_id),
-                "lease_ttl_seconds": await redis.ttl(keys.lease(args.work_id)),
+                lease_key: lease_detail,
             }
             out["item"] = out["item"].model_dump(mode="json") if out["item"] else None
             out["snapshot"] = out["snapshot"].model_dump(mode="json") if out["snapshot"] else None
             print(json.dumps(out, indent=2, sort_keys=True, default=str))
         finally:
+            if postgres:
+                await postgres.close()
             await redis.aclose()
 
     asyncio.run(run())
@@ -349,11 +444,24 @@ def _cmd_retry(args: argparse.Namespace) -> None:
         keys = RedisKeys(prefix=redis_prefix)
         redis = aioredis.from_url(args.redis_url, decode_responses=True)
         queue = Queue.from_url(args.redis_url, name=args.queue)
+        postgres = None
         try:
-            item = await RedisWorkItemStore(redis, keys=keys).get(args.work_id)
+            if args.runtime_mode == "production":
+                _require_postgres_runtime(args)
+                import psycopg
+
+                from roost.runtime.backends.postgres import PostgresControlPlaneStore, PostgresWorkItemStore
+
+                postgres = await psycopg.AsyncConnection.connect(args.postgres_url)
+                items = PostgresWorkItemStore(postgres)
+                control = PostgresControlPlaneStore(postgres)
+            else:
+                items = RedisWorkItemStore(redis, keys=keys)
+                control = RedisControlPlane(redis, keys=keys)
+
+            item = await items.get(args.work_id)
             if not item:
                 raise SystemExit(f"Work item not found: {args.work_id}")
-            control = RedisControlPlane(redis, keys=keys)
             await RedisInflightStore(redis, keys=keys).clear(args.work_id)
             await control.set_state(work_id=args.work_id, engine=item.engine, state="queued", step=args.step or "retry")
             await queue.enqueue(
@@ -373,6 +481,8 @@ def _cmd_retry(args: argparse.Namespace) -> None:
             )
             print(json.dumps({"work_id": args.work_id, "state": "queued"}, indent=2, sort_keys=True))
         finally:
+            if postgres:
+                await postgres.close()
             await redis.aclose()
 
     asyncio.run(run())
@@ -397,14 +507,36 @@ def _cmd_cancel(args: argparse.Namespace) -> None:
         redis_prefix = apply_namespace(args.redis_prefix, args.namespace)
         keys = RedisKeys(prefix=redis_prefix)
         redis = aioredis.from_url(args.redis_url, decode_responses=True)
+        postgres = None
         try:
-            item = await RedisWorkItemStore(redis, keys=keys).get(args.work_id)
+            if args.runtime_mode == "production":
+                _require_postgres_runtime(args)
+                import psycopg
+
+                from roost.runtime.backends.postgres import (
+                    PostgresControlPlaneStore,
+                    PostgresLeaseStore,
+                    PostgresResourceStore,
+                    PostgresWorkItemStore,
+                )
+
+                postgres = await psycopg.AsyncConnection.connect(args.postgres_url)
+                items = PostgresWorkItemStore(postgres)
+                control = PostgresControlPlaneStore(postgres)
+                lease_store = PostgresLeaseStore(postgres)
+                resource_store = PostgresResourceStore(postgres)
+            else:
+                items = RedisWorkItemStore(redis, keys=keys)
+                control = RedisControlPlane(redis, keys=keys)
+                lease_store = RedisLeaseManager(redis, keys=keys)
+                resource_store = RedisResourceManager(redis, keys=keys)
+
+            item = await items.get(args.work_id)
             if not item:
                 raise SystemExit(f"Work item not found: {args.work_id}")
-            control = RedisControlPlane(redis, keys=keys)
             await RedisInflightStore(redis, keys=keys).clear(args.work_id)
-            leases_cleared = await RedisLeaseManager(redis, keys=keys).clear(args.work_id)
-            resources_cleared = await RedisResourceManager(redis, keys=keys).clear(resources=item.resources)
+            leases_cleared = await lease_store.clear(args.work_id)
+            resources_cleared = await resource_store.clear(resources=item.resources)
             meta = await control.set_state(
                 work_id=args.work_id,
                 engine=item.engine,
@@ -423,6 +555,8 @@ def _cmd_cancel(args: argparse.Namespace) -> None:
             )
             print(json.dumps(meta, indent=2, sort_keys=True, default=str))
         finally:
+            if postgres:
+                await postgres.close()
             await redis.aclose()
 
     asyncio.run(run())
@@ -441,8 +575,21 @@ def _cmd_dlq(args: argparse.Namespace) -> None:
         redis_prefix = apply_namespace(args.redis_prefix, args.namespace)
         keys = RedisKeys(prefix=redis_prefix)
         redis = aioredis.from_url(args.redis_url, decode_responses=True)
+        postgres = None
         try:
-            control = RedisControlPlane(redis, keys=keys)
+            if args.runtime_mode == "production":
+                _require_postgres_runtime(args)
+                import psycopg
+
+                from roost.runtime.backends.postgres import PostgresControlPlaneStore, PostgresWorkItemStore
+
+                postgres = await psycopg.AsyncConnection.connect(args.postgres_url)
+                control = PostgresControlPlaneStore(postgres)
+                items = PostgresWorkItemStore(postgres)
+            else:
+                control = RedisControlPlane(redis, keys=keys)
+                items = RedisWorkItemStore(redis, keys=keys)
+
             if args.dlq_cmd == "list":
                 rows = await control.list_dlq(limit=args.limit, offset=args.offset)
                 print(json.dumps(rows, indent=2, sort_keys=True, default=str))
@@ -460,7 +607,7 @@ def _cmd_dlq(args: argparse.Namespace) -> None:
                 print(json.dumps({"acked": ok, "index": args.index}, indent=2, sort_keys=True))
                 return
 
-            item = await RedisWorkItemStore(redis, keys=keys).get(work_id)
+            item = await items.get(work_id)
             if not item:
                 raise SystemExit(f"Work item not found: {work_id}")
             queue = Queue.from_url(args.redis_url, name=args.queue)
@@ -485,6 +632,8 @@ def _cmd_dlq(args: argparse.Namespace) -> None:
             )
             print(json.dumps({"work_id": work_id, "state": "queued", "acked": acked}, indent=2, sort_keys=True))
         finally:
+            if postgres:
+                await postgres.close()
             await redis.aclose()
 
     asyncio.run(run())
@@ -502,14 +651,28 @@ def _cmd_list(args: argparse.Namespace) -> None:
         redis_prefix = apply_namespace(args.redis_prefix, args.namespace)
         keys = RedisKeys(prefix=redis_prefix)
         redis = aioredis.from_url(args.redis_url, decode_responses=True)
+        postgres = None
         try:
-            rows = await RedisControlPlane(redis, keys=keys).list_meta(
+            if args.runtime_mode == "production":
+                _require_postgres_runtime(args)
+                import psycopg
+
+                from roost.runtime.backends.postgres import PostgresControlPlaneStore
+
+                postgres = await psycopg.AsyncConnection.connect(args.postgres_url)
+                control = PostgresControlPlaneStore(postgres)
+            else:
+                control = RedisControlPlane(redis, keys=keys)
+
+            rows = await control.list_meta(
                 state=args.state,
                 limit=args.limit,
                 offset=args.offset,
             )
             print(json.dumps(rows, indent=2, sort_keys=True, default=str))
         finally:
+            if postgres:
+                await postgres.close()
             await redis.aclose()
 
     asyncio.run(run())
@@ -527,10 +690,24 @@ def _cmd_events(args: argparse.Namespace) -> None:
         redis_prefix = apply_namespace(args.redis_prefix, args.namespace)
         keys = RedisKeys(prefix=redis_prefix)
         redis = aioredis.from_url(args.redis_url, decode_responses=True)
+        postgres = None
         try:
-            events = await RedisControlPlane(redis, keys=keys).list_events(limit=args.limit)
+            if args.runtime_mode == "production":
+                _require_postgres_runtime(args)
+                import psycopg
+
+                from roost.runtime.backends.postgres import PostgresControlPlaneStore
+
+                postgres = await psycopg.AsyncConnection.connect(args.postgres_url)
+                control = PostgresControlPlaneStore(postgres)
+            else:
+                control = RedisControlPlane(redis, keys=keys)
+
+            events = await control.list_events(limit=args.limit)
             print(json.dumps(events, indent=2, sort_keys=True, default=str))
         finally:
+            if postgres:
+                await postgres.close()
             await redis.aclose()
 
     asyncio.run(run())
@@ -574,6 +751,36 @@ def _cmd_ui(args: argparse.Namespace) -> None:
     from roost.ui.server import config_from_args, run_console
 
     run_console(host=args.host, port=args.port, config=config_from_args(args))
+
+
+def _cmd_migrate(args: argparse.Namespace) -> None:
+    _apply_runtime_config(args)
+
+    from roost.runtime.backends.postgres import apply_migrations, list_migrations
+
+    if args.plan:
+        rows = [
+            {
+                "version": migration.version,
+                "name": migration.name,
+                "checksum": migration.checksum,
+            }
+            for migration in list_migrations()
+        ]
+        print(json.dumps(rows, indent=2, sort_keys=True))
+        return
+
+    if not args.postgres_url:
+        raise SystemExit(
+            "Postgres URL is required. Pass --postgres-url, set ROOST_POSTGRES_URL, "
+            "or add [postgres].url to roost.toml."
+        )
+
+    try:
+        rows = apply_migrations(args.postgres_url)
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from exc
+    print(json.dumps(rows, indent=2, sort_keys=True, default=str))
 
 
 def _nearest_existing_parent(path: str) -> str:
@@ -638,6 +845,42 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
             failures += 1
             _doctor_line("FAIL", "redis connection", f"{args.redis_url} ({exc})")
 
+    runtime_mode = getattr(args, "runtime_mode", "simple") or "simple"
+    _doctor_line("OK", "runtime mode", runtime_mode)
+    if runtime_mode == "production" or getattr(args, "postgres_url", None):
+        if not args.postgres_url:
+            failures += 1
+            _doctor_line("FAIL", "postgres url", "required for production mode")
+        else:
+            missing_postgres = _missing_postgres_deps()
+            if missing_postgres:
+                failures += 1
+                _doctor_line("FAIL", "postgres dependencies", f"missing: {', '.join(missing_postgres)}")
+            else:
+                _doctor_line("OK", "postgres dependencies", "psycopg installed")
+                try:
+                    import psycopg
+                    from roost.runtime.backends.postgres import check_migrations
+
+                    with psycopg.connect(args.postgres_url, connect_timeout=3) as conn:
+                        conn.execute("SELECT 1")
+                    _doctor_line("OK", "postgres connection", args.postgres_url)
+
+                    migration_rows = check_migrations(args.postgres_url)
+                    not_applied = [row for row in migration_rows if row.get("state") != "applied"]
+                    if not_applied:
+                        failures += 1
+                        details = ", ".join(
+                            f"{row['version']}:{row['state']}" for row in not_applied
+                        )
+                        _doctor_line("FAIL", "postgres migrations", f"{details}; run roost migrate")
+                    else:
+                        versions = ", ".join(str(row["version"]) for row in migration_rows)
+                        _doctor_line("OK", "postgres migrations", versions)
+                except Exception as exc:
+                    failures += 1
+                    _doctor_line("FAIL", "postgres connection", f"{args.postgres_url} ({exc})")
+
     registry = EngineRegistry.from_entry_points()
     available = registry.engine_ids()
     selected = available if args.engines == "all" else [e.strip() for e in args.engines.split(",") if e.strip()]
@@ -698,12 +941,21 @@ def _add_config_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", help="Path to roost.toml")
 
 
-def _add_redis_args(parser: argparse.ArgumentParser) -> None:
+def _add_redis_args(parser: argparse.ArgumentParser, *, production: bool = False) -> None:
     _add_config_arg(parser)
     parser.add_argument("--redis-url")
     parser.add_argument("--queue")
     parser.add_argument("--redis-prefix")
     parser.add_argument("--namespace")
+    if production:
+        parser.add_argument("--runtime-mode", choices=["simple", "production"])
+        parser.add_argument("--postgres-url")
+
+
+def _add_postgres_args(parser: argparse.ArgumentParser) -> None:
+    _add_config_arg(parser)
+    parser.add_argument("--runtime-mode", choices=["simple", "production"])
+    parser.add_argument("--postgres-url")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -713,7 +965,9 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("init", help="Create a minimal roost.toml")
     p.add_argument("--path", default="roost.toml")
     p.add_argument("--force", action="store_true")
+    p.add_argument("--runtime-mode", choices=["simple", "production"], default=DEFAULT_RUNTIME_MODE)
     p.add_argument("--redis-url", default=DEFAULT_REDIS_URL)
+    p.add_argument("--postgres-url")
     p.add_argument("--queue", default=DEFAULT_QUEUE)
     p.add_argument("--redis-prefix", default=DEFAULT_REDIS_PREFIX)
     p.add_argument("--namespace")
@@ -731,7 +985,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=_cmd_engines)
 
     p = sub.add_parser("enqueue", help="Enqueue a work item")
-    _add_redis_args(p)
+    _add_redis_args(p, production=True)
     p.add_argument("--engine", required=True)
     p.add_argument("--payload", required=True, help="JSON object")
     p.add_argument("--work-id")
@@ -743,8 +997,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--retries", type=int)
     p.set_defaults(fn=_cmd_enqueue)
 
-    p = sub.add_parser("worker", help="Run a Redis-backed worker")
-    _add_redis_args(p)
+    p = sub.add_parser("worker", help="Run a worker")
+    _add_redis_args(p, production=True)
     p.add_argument("--repo-path", default=".")
     p.add_argument("--engines", help="Comma-separated engine ids, or all")
     p.add_argument("--concurrency", type=int)
@@ -757,17 +1011,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=_cmd_worker)
 
     p = sub.add_parser("status", help="Show work item metadata and snapshot")
-    _add_redis_args(p)
+    _add_redis_args(p, production=True)
     p.add_argument("work_id")
     p.set_defaults(fn=_cmd_status)
 
     p = sub.add_parser("inspect", help="Show work item, snapshot, inflight, and lease details")
-    _add_redis_args(p)
+    _add_redis_args(p, production=True)
     p.add_argument("work_id")
     p.set_defaults(fn=_cmd_inspect)
 
     p = sub.add_parser("retry", help="Re-enqueue existing work")
-    _add_redis_args(p)
+    _add_redis_args(p, production=True)
     p.add_argument("work_id")
     p.add_argument("--delay-seconds", type=int, default=0)
     p.add_argument("--timeout", type=int)
@@ -776,7 +1030,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=_cmd_retry)
 
     p = sub.add_parser("cancel", help="Mark work as cancelled and clear local ownership markers")
-    _add_redis_args(p)
+    _add_redis_args(p, production=True)
     p.add_argument("work_id")
     p.add_argument("--reason")
     p.set_defaults(fn=_cmd_cancel)
@@ -785,13 +1039,13 @@ def build_parser() -> argparse.ArgumentParser:
     dlq_sub = p.add_subparsers(dest="dlq_cmd", required=True)
 
     dlq_list = dlq_sub.add_parser("list", help="List dead-letter entries")
-    _add_redis_args(dlq_list)
+    _add_redis_args(dlq_list, production=True)
     dlq_list.add_argument("--limit", type=int, default=50)
     dlq_list.add_argument("--offset", type=int, default=0)
     dlq_list.set_defaults(fn=_cmd_dlq)
 
     dlq_replay = dlq_sub.add_parser("replay", help="Re-enqueue a dead-letter entry by index")
-    _add_redis_args(dlq_replay)
+    _add_redis_args(dlq_replay, production=True)
     dlq_replay.add_argument("index", type=int)
     dlq_replay.add_argument("--ack", action="store_true", help="Remove the DLQ entry after enqueueing")
     dlq_replay.add_argument("--delay-seconds", type=int, default=0)
@@ -801,19 +1055,19 @@ def build_parser() -> argparse.ArgumentParser:
     dlq_replay.set_defaults(fn=_cmd_dlq)
 
     dlq_ack = dlq_sub.add_parser("ack", help="Remove a dead-letter entry by index")
-    _add_redis_args(dlq_ack)
+    _add_redis_args(dlq_ack, production=True)
     dlq_ack.add_argument("index", type=int)
     dlq_ack.set_defaults(fn=_cmd_dlq)
 
     p = sub.add_parser("list", help="List recent work metadata")
-    _add_redis_args(p)
+    _add_redis_args(p, production=True)
     p.add_argument("--state")
     p.add_argument("--limit", type=int, default=20)
     p.add_argument("--offset", type=int, default=0)
     p.set_defaults(fn=_cmd_list)
 
     p = sub.add_parser("events", help="List recent runtime events")
-    _add_redis_args(p)
+    _add_redis_args(p, production=True)
     p.add_argument("--limit", type=int, default=50)
     p.set_defaults(fn=_cmd_events)
 
@@ -844,9 +1098,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--artifact-root")
     p.set_defaults(fn=_cmd_ui)
 
+    p = sub.add_parser("migrate", help="Apply Postgres durable-state migrations")
+    _add_postgres_args(p)
+    p.add_argument("--repo-path", default=".")
+    p.add_argument("--plan", action="store_true", help="List packaged migrations without connecting to Postgres")
+    p.set_defaults(fn=_cmd_migrate)
+
     p = sub.add_parser("doctor", help="Check local Roost runtime configuration")
     _add_redis_args(p)
     p.add_argument("--repo-path", default=".")
+    p.add_argument("--runtime-mode", choices=["simple", "production"])
+    p.add_argument("--postgres-url")
     p.add_argument("--engines")
     p.add_argument("--workspace-root")
     p.add_argument("--workspace-mode", choices=["worktree", "clone"])
