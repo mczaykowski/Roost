@@ -80,6 +80,11 @@ root = ".roost/artifacts"
     assert status_args.runtime_mode == "production"
     assert status_args.postgres_url == "postgresql://localhost/roost_test"
 
+    ui_args = parser.parse_args(["ui", "--config", str(path), "--repo-path", str(tmp_path)])
+    _apply_runtime_config(ui_args)
+    assert ui_args.runtime_mode == "production"
+    assert ui_args.postgres_url == "postgresql://localhost/roost_test"
+
     migrate_args = parser.parse_args(["migrate", "--config", str(path), "--repo-path", str(tmp_path)])
     _apply_runtime_config(migrate_args)
     assert migrate_args.runtime_mode == "production"

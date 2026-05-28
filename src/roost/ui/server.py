@@ -35,6 +35,8 @@ class ConsoleConfig:
     queue_name: str
     repo_path: str
     artifact_root: str
+    runtime_mode: str = "simple"
+    postgres_url: str | None = None
     namespace: str | None = None
 
 
@@ -170,17 +172,43 @@ async def _with_redis(config: ConsoleConfig):
     return redis, keys
 
 
+def _production_mode(config: ConsoleConfig) -> bool:
+    return config.runtime_mode == "production"
+
+
+async def _with_postgres(config: ConsoleConfig):
+    if not config.postgres_url:
+        raise RuntimeError("Postgres URL is required for production mode")
+    try:
+        import psycopg
+    except Exception as exc:
+        raise RuntimeError(
+            "Missing Postgres runtime dependency. Install with: uv sync --extra postgres"
+        ) from exc
+    return await psycopg.AsyncConnection.connect(config.postgres_url)
+
+
 async def _summary(config: ConsoleConfig) -> dict[str, Any]:
     redis, keys = await _with_redis(config)
+    postgres = None
     try:
-        control = RedisControlPlane(redis, keys=keys)
+        if _production_mode(config):
+            from roost.runtime.backends.postgres import PostgresControlPlaneStore
+
+            postgres = await _with_postgres(config)
+            control = PostgresControlPlaneStore(postgres)
+        else:
+            control = RedisControlPlane(redis, keys=keys)
+
         rows = await control.list_meta(state=None, limit=500, offset=0)
         states = {"queued": 0, "running": 0, "done": 0, "failed": 0, "cancelled": 0}
         for row in rows:
             state = str(row.get("state") or "queued")
             states[state] = states.get(state, 0) + 1
         return {
+            "runtime_mode": config.runtime_mode,
             "redis_url": config.redis_url,
+            "postgres_url": config.postgres_url if _production_mode(config) else None,
             "queue": config.queue_name,
             "prefix": apply_namespace(config.redis_prefix, config.namespace),
             "total": len(rows),
@@ -188,15 +216,31 @@ async def _summary(config: ConsoleConfig) -> dict[str, Any]:
             "updated_at": time.time(),
         }
     finally:
+        if postgres:
+            await postgres.close()
         await redis.aclose()
 
 
 async def _work_list(config: ConsoleConfig, *, state: str | None, limit: int) -> dict[str, Any]:
     redis, keys = await _with_redis(config)
+    postgres = None
     try:
-        control = RedisControlPlane(redis, keys=keys)
-        items = RedisWorkItemStore(redis, keys=keys)
-        snapshots = RedisSnapshotStore(redis, keys=keys)
+        if _production_mode(config):
+            from roost.runtime.backends.postgres import (
+                PostgresControlPlaneStore,
+                PostgresSnapshotStore,
+                PostgresWorkItemStore,
+            )
+
+            postgres = await _with_postgres(config)
+            control = PostgresControlPlaneStore(postgres)
+            items = PostgresWorkItemStore(postgres)
+            snapshots = PostgresSnapshotStore(postgres)
+        else:
+            control = RedisControlPlane(redis, keys=keys)
+            items = RedisWorkItemStore(redis, keys=keys)
+            snapshots = RedisSnapshotStore(redis, keys=keys)
+
         rows = await control.list_meta(
             state=state or None,
             limit=max(1, min(limit, 200)),
@@ -223,15 +267,31 @@ async def _work_list(config: ConsoleConfig, *, state: str | None, limit: int) ->
             )
         return {"rows": enriched}
     finally:
+        if postgres:
+            await postgres.close()
         await redis.aclose()
 
 
 async def _work_detail(config: ConsoleConfig, *, work_id: str) -> dict[str, Any]:
     redis, keys = await _with_redis(config)
+    postgres = None
     try:
-        control = RedisControlPlane(redis, keys=keys)
-        items = RedisWorkItemStore(redis, keys=keys)
-        snapshots = RedisSnapshotStore(redis, keys=keys)
+        if _production_mode(config):
+            from roost.runtime.backends.postgres import (
+                PostgresControlPlaneStore,
+                PostgresSnapshotStore,
+                PostgresWorkItemStore,
+            )
+
+            postgres = await _with_postgres(config)
+            control = PostgresControlPlaneStore(postgres)
+            items = PostgresWorkItemStore(postgres)
+            snapshots = PostgresSnapshotStore(postgres)
+        else:
+            control = RedisControlPlane(redis, keys=keys)
+            items = RedisWorkItemStore(redis, keys=keys)
+            snapshots = RedisSnapshotStore(redis, keys=keys)
+
         item = await items.get(work_id)
         snapshot = await snapshots.load(work_id)
         return {
@@ -240,26 +300,47 @@ async def _work_detail(config: ConsoleConfig, *, work_id: str) -> dict[str, Any]
             "snapshot": snapshot.model_dump(mode="json") if snapshot else None,
         }
     finally:
+        if postgres:
+            await postgres.close()
         await redis.aclose()
 
 
 async def _events(config: ConsoleConfig, *, limit: int) -> dict[str, Any]:
     redis, keys = await _with_redis(config)
+    postgres = None
     try:
-        events = await RedisControlPlane(redis, keys=keys).list_events(limit=max(1, min(limit, 200)))
+        if _production_mode(config):
+            from roost.runtime.backends.postgres import PostgresControlPlaneStore
+
+            postgres = await _with_postgres(config)
+            control = PostgresControlPlaneStore(postgres)
+        else:
+            control = RedisControlPlane(redis, keys=keys)
+        events = await control.list_events(limit=max(1, min(limit, 200)))
         return {"rows": events}
     finally:
+        if postgres:
+            await postgres.close()
         await redis.aclose()
 
 
 async def _failed(config: ConsoleConfig, *, limit: int) -> dict[str, Any]:
     redis, keys = await _with_redis(config)
+    postgres = None
     try:
-        control = RedisControlPlane(redis, keys=keys)
+        if _production_mode(config):
+            from roost.runtime.backends.postgres import PostgresControlPlaneStore
+
+            postgres = await _with_postgres(config)
+            control = PostgresControlPlaneStore(postgres)
+        else:
+            control = RedisControlPlane(redis, keys=keys)
         rows = await control.list_meta(state="failed", limit=max(1, min(limit, 200)), offset=0)
         dlq = await control.list_dlq(limit=max(1, min(limit, 200)), offset=0)
         return {"rows": rows, "dlq": dlq}
     finally:
+        if postgres:
+            await postgres.close()
         await redis.aclose()
 
 
@@ -267,16 +348,26 @@ async def _retry_work(config: ConsoleConfig, *, work_id: str, payload: dict[str,
     from saq import Queue
 
     redis, keys = await _with_redis(config)
+    postgres = None
     queue = Queue.from_url(config.redis_url, name=config.queue_name)
     try:
-        item = await RedisWorkItemStore(redis, keys=keys).get(work_id)
+        if _production_mode(config):
+            from roost.runtime.backends.postgres import PostgresControlPlaneStore, PostgresWorkItemStore
+
+            postgres = await _with_postgres(config)
+            items = PostgresWorkItemStore(postgres)
+            control = PostgresControlPlaneStore(postgres)
+        else:
+            items = RedisWorkItemStore(redis, keys=keys)
+            control = RedisControlPlane(redis, keys=keys)
+
+        item = await items.get(work_id)
         if not item:
             raise LookupError(f"Work item not found: {work_id}")
         delay_seconds = max(0, int(payload.get("delay_seconds") or 0))
         timeout = int(payload.get("timeout") or 120)
         retries = int(payload.get("retries") or 5)
         step = str(payload.get("step") or "ui_retry")
-        control = RedisControlPlane(redis, keys=keys)
         await RedisInflightStore(redis, keys=keys).clear(work_id)
         await control.set_state(work_id=work_id, engine=item.engine, state="queued", step=step)
         await queue.enqueue(
@@ -297,20 +388,41 @@ async def _retry_work(config: ConsoleConfig, *, work_id: str, payload: dict[str,
         )
         return {"ok": True, "work_id": work_id, "state": "queued"}
     finally:
+        if postgres:
+            await postgres.close()
         await redis.aclose()
 
 
 async def _cancel_work(config: ConsoleConfig, *, work_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     redis, keys = await _with_redis(config)
+    postgres = None
     try:
-        item = await RedisWorkItemStore(redis, keys=keys).get(work_id)
+        if _production_mode(config):
+            from roost.runtime.backends.postgres import (
+                PostgresControlPlaneStore,
+                PostgresLeaseStore,
+                PostgresResourceStore,
+                PostgresWorkItemStore,
+            )
+
+            postgres = await _with_postgres(config)
+            items = PostgresWorkItemStore(postgres)
+            control = PostgresControlPlaneStore(postgres)
+            lease_store = PostgresLeaseStore(postgres)
+            resource_store = PostgresResourceStore(postgres)
+        else:
+            items = RedisWorkItemStore(redis, keys=keys)
+            control = RedisControlPlane(redis, keys=keys)
+            lease_store = RedisLeaseManager(redis, keys=keys)
+            resource_store = RedisResourceManager(redis, keys=keys)
+
+        item = await items.get(work_id)
         if not item:
             raise LookupError(f"Work item not found: {work_id}")
         reason = str(payload.get("reason") or "ui_cancelled")
-        control = RedisControlPlane(redis, keys=keys)
         await RedisInflightStore(redis, keys=keys).clear(work_id)
-        leases_cleared = await RedisLeaseManager(redis, keys=keys).clear(work_id)
-        resources_cleared = await RedisResourceManager(redis, keys=keys).clear(resources=item.resources)
+        leases_cleared = await lease_store.clear(work_id)
+        resources_cleared = await resource_store.clear(resources=item.resources)
         meta = await control.set_state(work_id=work_id, engine=item.engine, state="cancelled", step=reason)
         await control.push_event(
             {
@@ -325,13 +437,22 @@ async def _cancel_work(config: ConsoleConfig, *, work_id: str, payload: dict[str
         )
         return {"ok": True, "work_id": work_id, "state": "cancelled", "meta": meta}
     finally:
+        if postgres:
+            await postgres.close()
         await redis.aclose()
 
 
 async def _replay_dlq(config: ConsoleConfig, *, index: int, payload: dict[str, Any]) -> dict[str, Any]:
     redis, keys = await _with_redis(config)
+    postgres = None
     try:
-        control = RedisControlPlane(redis, keys=keys)
+        if _production_mode(config):
+            from roost.runtime.backends.postgres import PostgresControlPlaneStore
+
+            postgres = await _with_postgres(config)
+            control = PostgresControlPlaneStore(postgres)
+        else:
+            control = RedisControlPlane(redis, keys=keys)
         entry = await control.get_dlq(index)
         if not entry:
             raise LookupError(f"DLQ entry not found at index {index}")
@@ -339,6 +460,8 @@ async def _replay_dlq(config: ConsoleConfig, *, index: int, payload: dict[str, A
         if not work_id:
             raise LookupError(f"DLQ entry at index {index} does not include a work_id")
     finally:
+        if postgres:
+            await postgres.close()
         await redis.aclose()
 
     result = await _retry_work(
@@ -359,10 +482,20 @@ async def _replay_dlq(config: ConsoleConfig, *, index: int, payload: dict[str, A
 
 async def _ack_dlq(config: ConsoleConfig, *, index: int) -> dict[str, Any]:
     redis, keys = await _with_redis(config)
+    postgres = None
     try:
-        ok = await RedisControlPlane(redis, keys=keys).ack_dlq(index)
+        if _production_mode(config):
+            from roost.runtime.backends.postgres import PostgresControlPlaneStore
+
+            postgres = await _with_postgres(config)
+            control = PostgresControlPlaneStore(postgres)
+        else:
+            control = RedisControlPlane(redis, keys=keys)
+        ok = await control.ack_dlq(index)
         return {"ok": ok, "acked": ok, "index": index}
     finally:
+        if postgres:
+            await postgres.close()
         await redis.aclose()
 
 
@@ -409,5 +542,7 @@ def config_from_args(args: Any) -> ConsoleConfig:
             artifact_root=args.artifact_root,
             namespace=args.namespace,
         ),
+        runtime_mode=getattr(args, "runtime_mode", "simple") or "simple",
+        postgres_url=getattr(args, "postgres_url", None),
         namespace=args.namespace,
     )

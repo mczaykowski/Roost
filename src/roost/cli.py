@@ -747,6 +747,8 @@ def _cmd_artifact_show(args: argparse.Namespace) -> None:
 def _cmd_ui(args: argparse.Namespace) -> None:
     _apply_runtime_config(args)
     _require_redis_deps()
+    if args.runtime_mode == "production":
+        _require_postgres_runtime(args)
 
     from roost.ui.server import config_from_args, run_console
 
@@ -1091,7 +1093,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(fn=_cmd_artifact_show)
 
     p = sub.add_parser("ui", help="Run the local Roost Console")
-    _add_redis_args(p)
+    _add_redis_args(p, production=True)
     p.add_argument("--host", default=os.getenv("ROOST_UI_HOST", "127.0.0.1"))
     p.add_argument("--port", type=int, default=int(os.getenv("ROOST_UI_PORT", "8766")))
     p.add_argument("--repo-path", default=".")
