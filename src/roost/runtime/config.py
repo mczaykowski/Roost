@@ -10,6 +10,7 @@ DEFAULT_REDIS_URL = "redis://localhost:6379/0"
 DEFAULT_QUEUE = "default"
 DEFAULT_REDIS_PREFIX = "roost"
 DEFAULT_WORKSPACE_MODE = "worktree"
+DEFAULT_RUNTIME_MODE = "simple"
 
 
 class TriggerConfig(BaseModel):
@@ -28,6 +29,18 @@ class RedisRuntimeConfig(BaseModel):
     queue: str = DEFAULT_QUEUE
     prefix: str = DEFAULT_REDIS_PREFIX
     namespace: Optional[str] = None
+
+
+class RuntimeModeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["simple", "production"] = DEFAULT_RUNTIME_MODE
+
+
+class PostgresRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: Optional[str] = None
 
 
 class WorkerRuntimeConfig(BaseModel):
@@ -58,7 +71,9 @@ class RoostConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    runtime: RuntimeModeConfig = Field(default_factory=RuntimeModeConfig)
     redis: RedisRuntimeConfig = Field(default_factory=RedisRuntimeConfig)
+    postgres: PostgresRuntimeConfig = Field(default_factory=PostgresRuntimeConfig)
     worker: WorkerRuntimeConfig = Field(default_factory=WorkerRuntimeConfig)
     artifacts: ArtifactRuntimeConfig = Field(default_factory=ArtifactRuntimeConfig)
     triggers: list[TriggerConfig] = Field(default_factory=list)
