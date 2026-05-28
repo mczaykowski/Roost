@@ -4,6 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REDIS_PORT="${ROOST_E2E_REDIS_PORT:-6392}"
 HTTP_PORT="${ROOST_E2E_HTTP_PORT:-8777}"
+UI_PORT="${ROOST_E2E_UI_PORT:-8788}"
 POSTGRES_PORT="${ROOST_E2E_POSTGRES_PORT:-55442}"
 REDIS_NAME="roost-e2e-prod-redis-$$"
 POSTGRES_NAME="roost-e2e-prod-postgres-$$"
@@ -15,8 +16,10 @@ POSTGRES_URL="postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@localhost:${POS
 REDIS_PREFIX="roost-e2e-prod-$$"
 ARTIFACT_ROOT="$(mktemp -d /tmp/roost-e2e-prod-artifacts.XXXXXX)"
 HTTP_LOG="$(mktemp /tmp/roost-e2e-prod-http.XXXXXX)"
+UI_LOG="$(mktemp /tmp/roost-e2e-prod-ui.XXXXXX)"
 WORKER_LOG="$(mktemp /tmp/roost-e2e-prod-worker.XXXXXX)"
 HTTP_PID=""
+UI_PID=""
 WORKER_PID=""
 
 cleanup() {
@@ -27,6 +30,10 @@ cleanup() {
   if [[ -n "${HTTP_PID}" ]] && kill -0 "${HTTP_PID}" 2>/dev/null; then
     kill "${HTTP_PID}" 2>/dev/null || true
     wait "${HTTP_PID}" 2>/dev/null || true
+  fi
+  if [[ -n "${UI_PID}" ]] && kill -0 "${UI_PID}" 2>/dev/null; then
+    kill "${UI_PID}" 2>/dev/null || true
+    wait "${UI_PID}" 2>/dev/null || true
   fi
   docker rm -f "${REDIS_NAME}" >/dev/null 2>&1 || true
   docker rm -f "${POSTGRES_NAME}" >/dev/null 2>&1 || true
@@ -60,6 +67,24 @@ wait_for_postgres() {
     sleep 0.5
   done
   echo "Postgres did not become ready" >&2
+  return 1
+}
+
+wait_for_ui() {
+  for _ in {1..30}; do
+    if UI_PORT="${UI_PORT}" python3 - <<'PY' >/dev/null 2>&1
+import os
+import urllib.request
+
+with urllib.request.urlopen(f"http://127.0.0.1:{os.environ['UI_PORT']}/api/summary", timeout=1) as response:
+    raise SystemExit(0 if response.status == 200 else 1)
+PY
+    then
+      return 0
+    fi
+    sleep 0.5
+  done
+  echo "Roost Console did not become ready" >&2
   return 1
 }
 
@@ -116,6 +141,20 @@ start_worker() {
     --repo-path "${ROOT_DIR}" \
     >"${WORKER_LOG}" 2>&1 &
   WORKER_PID="$!"
+}
+
+start_ui() {
+  roost ui \
+    --runtime-mode production \
+    --postgres-url "${POSTGRES_URL}" \
+    --redis-url "${REDIS_URL}" \
+    --redis-prefix "${REDIS_PREFIX}" \
+    --host 127.0.0.1 \
+    --port "${UI_PORT}" \
+    --artifact-root "${ARTIFACT_ROOT}" \
+    --repo-path "${ROOT_DIR}" \
+    >"${UI_LOG}" 2>&1 &
+  UI_PID="$!"
 }
 
 cd "${ROOT_DIR}"
@@ -243,6 +282,42 @@ if [[ "${EVENT_MATCHES}" -lt 1 ]]; then
   exit 1
 fi
 
+echo "Starting production-mode Roost Console"
+start_ui
+wait_for_ui
+
+UI_PORT="${UI_PORT}" WORK_ID="${WORK_ID}" python3 - <<'PY'
+import json
+import os
+import urllib.request
+
+base = f"http://127.0.0.1:{os.environ['UI_PORT']}"
+work_id = os.environ["WORK_ID"]
+
+def get_json(path: str):
+    with urllib.request.urlopen(base + path, timeout=3) as response:
+        if response.status != 200:
+            raise SystemExit(f"{path} returned {response.status}")
+        return json.load(response)
+
+summary = get_json("/api/summary")
+work = get_json("/api/work?state=done&limit=20")
+detail = get_json(f"/api/work/{work_id}")
+events = get_json("/api/events?limit=20")
+failed = get_json("/api/failed?limit=20")
+
+if summary.get("runtime_mode") != "production":
+    raise SystemExit("Console summary is not in production mode")
+if not any(row.get("work_id") == work_id for row in work.get("rows", [])):
+    raise SystemExit("Console work list did not include completed work")
+if (detail.get("meta") or {}).get("state") != "done":
+    raise SystemExit("Console work detail did not read done state")
+if not any(row.get("work_id") == work_id for row in events.get("rows", [])):
+    raise SystemExit("Console events did not include work events")
+if "dlq" not in failed:
+    raise SystemExit("Console failed endpoint did not return DLQ data")
+PY
+
 POSTGRES_URL="${POSTGRES_URL}" WORK_ID="${WORK_ID}" ARTIFACT_ID="${ARTIFACT_ID}" uv run --extra postgres python - <<'PY'
 import os
 import psycopg
@@ -262,6 +337,7 @@ PY
 
 echo "Final status: ${VERDICT} after ${FINAL_CHECKS} persisted observations"
 echo "Production inspect/list/events read from Postgres"
+echo "Production console APIs read from Postgres"
 echo "Artifact metadata and worker heartbeat recorded in Postgres"
 echo "Artifact: ${ARTIFACT_ID}"
 echo
