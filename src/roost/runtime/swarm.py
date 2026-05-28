@@ -24,6 +24,15 @@ from roost.runtime.backends.redis import (
     RedisSnapshotStore,
     RedisWorkItemStore,
 )
+from roost.runtime.stores import (
+    ControlPlaneStore,
+    InflightStore,
+    LeaseStore,
+    ResourceStore,
+    RuntimeStores,
+    SnapshotStore,
+    WorkItemStore,
+)
 if typing.TYPE_CHECKING:
     from roost.runtime.config import RoostConfig
 
@@ -68,12 +77,20 @@ class _RedisSwarmRuntime:
         self.queue = Queue.from_url(config.redis_url, name=config.queue_name)
 
         self.keys = RedisKeys(prefix=config.redis_prefix)
-        self.leases = RedisLeaseManager(self.redis, keys=self.keys)
-        self.resources = RedisResourceManager(self.redis, keys=self.keys)
-        self.work_items = RedisWorkItemStore(self.redis, keys=self.keys)
-        self.snapshots = RedisSnapshotStore(self.redis, keys=self.keys)
-        self.inflight = RedisInflightStore(self.redis, keys=self.keys)
-        self.control = RedisControlPlane(self.redis, keys=self.keys)
+        self.stores = RuntimeStores(
+            work_items=RedisWorkItemStore(self.redis, keys=self.keys),
+            snapshots=RedisSnapshotStore(self.redis, keys=self.keys),
+            leases=RedisLeaseManager(self.redis, keys=self.keys),
+            resources=RedisResourceManager(self.redis, keys=self.keys),
+            inflight=RedisInflightStore(self.redis, keys=self.keys),
+            control=RedisControlPlane(self.redis, keys=self.keys),
+        )
+        self.leases: LeaseStore = self.stores.leases
+        self.resources: ResourceStore = self.stores.resources
+        self.work_items: WorkItemStore = self.stores.work_items
+        self.snapshots: SnapshotStore = self.stores.snapshots
+        self.inflight: InflightStore = self.stores.inflight
+        self.control: ControlPlaneStore = self.stores.control
 
     async def close(self) -> None:
         await self.redis.aclose()

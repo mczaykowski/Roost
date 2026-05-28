@@ -5,8 +5,24 @@ import re
 
 from roost.runtime.artifacts import FileArtifactStore
 from roost.runtime.backends.redis import RedisKeys
+from roost.runtime.backends.redis import (
+    RedisControlPlane,
+    RedisInflightStore,
+    RedisLeaseManager,
+    RedisResourceManager,
+    RedisSnapshotStore,
+    RedisWorkItemStore,
+)
 from roost.runtime.models import WorkItem
 from roost.runtime.registry import EngineRegistry
+from roost.runtime.stores import (
+    ControlPlaneStore,
+    InflightStore,
+    LeaseStore,
+    ResourceStore,
+    SnapshotStore,
+    WorkItemStore,
+)
 from roost.runtime.swarm import RedisSwarm, _RedisSwarmRuntime
 from roost.runtime.workspaces import WorkspaceManager, WorkspaceSpec
 
@@ -38,6 +54,15 @@ def test_file_artifact_store_put_and_path(tmp_path):
     path = store.get_path(artifact.artifact_id, ext="patch")
     assert path.endswith(f"{artifact.artifact_id}.patch")
     assert store.read_bytes(artifact.artifact_id, ext="patch") == b"hello"
+
+
+def test_redis_stores_satisfy_runtime_store_protocols():
+    assert issubclass(RedisWorkItemStore, WorkItemStore)
+    assert issubclass(RedisSnapshotStore, SnapshotStore)
+    assert issubclass(RedisLeaseManager, LeaseStore)
+    assert issubclass(RedisResourceManager, ResourceStore)
+    assert issubclass(RedisInflightStore, InflightStore)
+    assert issubclass(RedisControlPlane, ControlPlaneStore)
 
 
 def test_workspace_path_is_stable_and_safe(tmp_path):

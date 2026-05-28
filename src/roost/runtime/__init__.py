@@ -6,5 +6,26 @@ scheduling, leases, retries, resource claims, artifacts, and observability.
 """
 
 from .models import Artifact, Lease, Snapshot, WorkItem
+from .stores import (
+    ControlPlaneStore,
+    InflightStore,
+    LeaseStore,
+    ResourceStore,
+    RuntimeStores,
+    SnapshotStore,
+    WorkItemStore,
+)
 
-__all__ = ["Artifact", "Lease", "Snapshot", "WorkItem"]
+__all__ = [
+    "Artifact",
+    "ControlPlaneStore",
+    "InflightStore",
+    "Lease",
+    "LeaseStore",
+    "ResourceStore",
+    "RuntimeStores",
+    "Snapshot",
+    "SnapshotStore",
+    "WorkItem",
+    "WorkItemStore",
+]
