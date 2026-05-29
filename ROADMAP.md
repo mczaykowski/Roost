@@ -33,6 +33,23 @@ create work
 
 The engine owns domain-specific behavior. Roost owns the operational substrate.
 
+## Current Status
+
+Roost now has the first production-shaped OSS foundation in place:
+
+- Simple mode remains Redis-only for local development and demos.
+- Production mode uses Redis for queueing/in-flight movement and Postgres for
+  durable work items, snapshots, leases, resource claims, events, DLQ entries,
+  artifact metadata, and worker heartbeats.
+- `roost migrate` and production-mode `roost doctor` are available.
+- Operator commands and the local console can read production-mode state.
+- `examples/production/` provides a Redis + Postgres Docker Compose sandbox.
+- CI exercises Redis e2e, Postgres migrations, and production-mode crash/resume.
+
+The remaining roadmap is about making that foundation more complete for teams:
+retention, backup/restore guidance, stronger audit trails, object storage,
+environment separation, and eventually cloud control-plane workflows.
+
 ## Phase 0: Make The Project Legible
 
 Goal: a serious engineer lands on GitHub and understands Roost in under five
@@ -60,14 +77,17 @@ Goal: Roost becomes safe enough to run real background agent workloads.
 
 Ship:
 
-- Postgres-backed durable storage as the canonical production backend.
+- Postgres-backed durable storage as the canonical production backend. Shipped
+  for current work items, snapshots, leases, resource claims, events, DLQ,
+  artifact metadata, and worker heartbeats.
 - Internal store boundaries for work items, snapshots, leases, events, resource
   claims, artifacts metadata, retry state, dead-letter entries, and worker
-  heartbeats.
-- A boring migration path with `roost migrate`.
-- Worker identity, graceful shutdown, stale lease recovery, and crash-resume
-  behavior as first-class concepts.
-- Clear retry and dead-letter behavior.
+  heartbeats. Initial boundaries are in place.
+- A boring migration path with `roost migrate`. Shipped.
+- Worker identity, stale lease recovery, and crash-resume behavior as
+  first-class concepts. Initial production-mode behavior is covered by e2e.
+- Clear retry and dead-letter behavior. Initial CLI and console controls are
+  shipped.
 - Structured logs, health checks, and metrics hooks.
 - Honest runtime guarantees in the docs: at-least-once execution, resumable
   snapshots, lease ownership, resource locking, and engine idempotency
@@ -84,17 +104,20 @@ Goal: production setup should feel simple, not ceremonial.
 
 Ship:
 
-- `roost init` to create a minimal `roost.toml`.
+- `roost init` to create a minimal `roost.toml`. Shipped.
 - `roost doctor` to validate backend connectivity, migrations, queues, artifact
-  storage, and worker health.
+  storage, and worker health. Shipped for core local and production setup.
 - `roost dev` for local demo/runtime startup.
 - CLI commands for inspect, retry, cancel, resume, list dead-lettered work,
-  replay dead-lettered work, and view artifacts.
+  replay dead-lettered work, worker heartbeats, and view artifacts. Shipped for
+  the current operator surface except a separate `resume` command.
 - A local console with work list, detail view, snapshot timeline, artifacts,
-  events, retry controls, failed work, and worker status.
+  events, retry controls, failed work, and worker status. Shipped as a local
+  console, with more timeline polish still useful.
 - Human UI wording: Work, Running, Waiting, Done, Failed, Retry, Resume, Last
   step.
-- Docker Compose examples for Postgres and Redis.
+- Docker Compose examples for Postgres and Redis. Shipped in
+  `examples/production/`.
 - Deployment recipes for small-team paths.
 
 Gate:
@@ -181,7 +204,7 @@ Roost should add production interfaces around that contract, not replace it:
 - `roost.toml` for backend, queue, artifacts, namespace, retention, and worker
   configuration.
 - CLI commands: `init`, `dev`, `doctor`, `migrate`, `worker`, `list`,
-  `inspect`, `retry`, `resume`, `cancel`, and `dlq`.
+  `inspect`, `retry`, `workers`, `resume`, `cancel`, and `dlq`.
 - Internal backend boundaries: work store, snapshot store, lease store, event
   store, artifact store, and queue adapter.
 - Cloud worker protocol later: register, heartbeat, upload events, upload

@@ -3,7 +3,37 @@
 Roost follows simple release notes: what changed, why it matters operationally,
 and anything users should know before upgrading.
 
-## 0.1.0 - Unreleased
+## 0.2.0 - Unreleased
+
+Production-mode foundation for running Roost with Redis for movement and
+Postgres for durable operational memory.
+
+### Added
+
+- Postgres-backed production mode for work items, snapshots, leases, resource
+  claims, events, DLQ entries, artifact metadata, and worker heartbeats.
+- `roost migrate` for applying packaged Postgres migrations.
+- Production-mode `roost doctor` checks for Postgres connectivity and applied
+  migrations.
+- Production-aware operator commands for status, inspect, list, events, retry,
+  cancel, DLQ, and worker heartbeats.
+- `roost workers` for inspecting active and stale worker heartbeats.
+- Production-aware local console with work, events, failed work, artifacts, and
+  workers backed by Postgres state.
+- `examples/production/` Docker Compose sandbox for Redis + Postgres.
+- Postgres e2e scripts for migration idempotency and production-mode
+  crash/resume.
+- CI coverage for Redis e2e, Postgres migrations, and production-mode e2e.
+
+### Operational Notes
+
+- Simple mode remains Redis-only.
+- Production mode still uses Redis for queueing and in-flight markers.
+- Postgres is the durable system of record in production mode.
+- Object storage adapters, retention controls, backup/restore guidance, and
+  project/environment separation remain roadmap items.
+
+## 0.1.0
 
 Initial public release of Roost as a tiny runtime for durable, resumable agent
 workers.
@@ -28,8 +58,8 @@ workers.
 
 ### Operational Notes
 
-- The current production path is Redis-backed.
+- The 0.1.0 production path was Redis-backed.
 - Execution is at-least-once; engine `step()` implementations should be safe to retry from the same snapshot.
 - The console is local-only by default.
-- Postgres as the production system of record is planned, but not included in this release.
-
+- Postgres as the production system of record was planned, but not included in
+  this release.

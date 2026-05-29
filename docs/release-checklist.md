@@ -32,6 +32,15 @@ scripts/e2e_postgres_migrate.sh
 scripts/e2e_postgres_watchlist.sh
 ```
 
+- If production setup or operator docs changed, run the sandbox doctor flow:
+
+```bash
+docker compose -f examples/production/docker-compose.yml up -d
+uv run roost migrate --config examples/production/roost.toml
+uv run roost doctor --config examples/production/roost.toml
+uv run roost workers --config examples/production/roost.toml
+```
+
 - Run unit tests:
 
 ```bash
@@ -58,6 +67,8 @@ scripts/e2e_watchlist.sh
 - Kill and restart the worker.
 - Confirm the job finishes from the latest persisted snapshot.
 - Open the console and verify work, events, and artifacts are visible.
+- In production mode, verify `roost workers` and the console Workers view show
+  at least one active worker.
 
 ## Release Notes
 
