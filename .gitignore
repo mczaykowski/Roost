@@ -6,6 +6,8 @@ __pycache__/
 .venv/
 .env
 .roost/
+# seed orientation state: audit log is regenerated; tracked files live in policy/manifest
+.seedrop/view/audit.json
 dist/
 build/
 *.egg-info/

@@ -1,0 +1,80 @@
+{
+  "schema_version": "1.0",
+  "workspace_id": "Roost",
+  "purpose": "Durable runtime for long-running agent workers — keeps agents alive, inspectable, and resumable through crashes, retries, and operator intervention.",
+  "current_focus": "Operator-polish branch: production-mode hardening and operability surfaces.",
+  "success_required": "L2",
+  "verification_commands": ["uv run pytest", "uv run ruff check ."],
+  "working_agreements": [
+    "The engine contract is two async methods (init_snapshot, step). Do not add lifecycle hooks without strong justification.",
+    "Engines must make step() retry-safe from the same snapshot — execution is at-least-once, not exactly-once.",
+    "Simple mode = Redis for both movement and memory. Production mode = Redis for movement, Postgres for memory. Do not blur this boundary.",
+    "Snapshots are the unit of durability; never mutate engine state outside a snapshot save.",
+    "Redis keys are movement infrastructure; Postgres tables are memory. Recovery paths must not depend on Redis in production mode."
+  ],
+  "path_purposes": {
+    "README.md": {
+      "purpose": "Fast project orientation: thesis, engine contract, execution loop, storage modes."
+    },
+    "ROADMAP.md": {
+      "purpose": "Execution sequence and what is explicitly not built yet (snapshot history, retention, audit log)."
+    },
+    "CHANGELOG.md": {
+      "purpose": "Release history; 0.2.0 unreleased covers Postgres production foundation."
+    },
+    "pyproject.toml": {
+      "purpose": "Toolchain, entry points, optional [postgres] extra, ruff config (line-length 100)."
+    },
+    "docs/runtime-storage.md": {
+      "purpose": "Load-bearing architecture doc: Redis=movement, Postgres=memory, Object=evidence."
+    },
+    "docs/": {
+      "purpose": "Operator-facing docs; runtime-storage.md is the most cited."
+    },
+    "src/roost/cli.py": {
+      "purpose": "argparse CLI: init/doctor/enqueue/worker/status/dlq/ui. Primary entry point for operators."
+    },
+    "src/roost/runtime/models.py": {
+      "purpose": "Core data model: WorkItem, Snapshot, Lease, Artifact. Read first when reasoning about correctness."
+    },
+    "src/roost/runtime/engine.py": {
+      "purpose": "Engine Protocol — the two-method contract everything plugs into."
+    },
+    "src/roost/runtime/stores.py": {
+      "purpose": "Store Protocol interfaces + Postgres implementations. Hot path for production correctness."
+    },
+    "src/roost/runtime/swarm.py": {
+      "purpose": "_RedisSwarmRuntime: the execution loop, lease renewal, orphan recovery, CAS-on-version. Load-bearing runtime logic."
+    },
+    "src/roost/runtime/config.py": {
+      "purpose": "roost.toml schema (pydantic) and trigger evaluation."
+    },
+    "src/roost/runtime/backends/redis.py": {
+      "purpose": "Simple-mode stores: Redis Lua scripts for CAS, lease renew/release, resource claims."
+    },
+    "src/roost/runtime/backends/postgres/": {
+      "purpose": "Production stores and SQL migrations. Single shared async connection (see known concurrency caveat)."
+    },
+    "src/roost/runtime/backends/postgres/migrations/0001_initial.sql": {
+      "purpose": "Initial schema: work_items, work_meta, snapshots (latest-only), artifacts, leases, claims, events, dlq, heartbeats, operator_actions."
+    },
+    "src/roost/runtime/artifacts.py": {
+      "purpose": "FileArtifactStore: content-addressed (sha256) artifact storage on disk."
+    },
+    "src/roost/runtime/workspaces.py": {
+      "purpose": "Git worktree/clone isolation per work item."
+    },
+    "src/roost/engines/": {
+      "purpose": "Built-in engines (demo, watchlist). Pluggable via entry points roost.engines."
+    },
+    "src/roost/engines/watchlist/engine.py": {
+      "purpose": "Reference engine: crash-safe URL checker producing a JSON evidence report."
+    },
+    "src/roost/ui/server.py": {
+      "purpose": "Local console: aiohttp server on :8766 for inspecting work, events, DLQ."
+    },
+    "tests/": {
+      "purpose": "pytest-asyncio suite; test_runtime_primitives.py is the orientation test."
+    }
+  }
+}

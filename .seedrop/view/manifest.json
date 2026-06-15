@@ -1,0 +1,425 @@
+{
+  "schema_version": "1.0",
+  "workspace_id": "Roost",
+  "root": ".",
+  "updated_at": "2026-06-15T06:38:49.163Z",
+  "recommended_reads": [
+    {
+      "path": "README.md",
+      "reason": "Project thesis, engine contract, execution loop, storage modes",
+      "priority": 1
+    },
+    {
+      "path": "docs/runtime-storage.md",
+      "reason": "Load-bearing architecture: movement/memory/evidence split",
+      "priority": 2
+    },
+    {
+      "path": "src/roost/runtime/models.py",
+      "reason": "Core data model \u2014 WorkItem, Snapshot, Lease, Artifact",
+      "priority": 3
+    },
+    {
+      "path": "src/roost/runtime/swarm.py",
+      "reason": "Execution loop, lease renewal, orphan recovery, CAS snapshots",
+      "priority": 4
+    },
+    {
+      "path": "pyproject.toml",
+      "reason": "Toolchain, entry points, optional extras",
+      "priority": 5
+    }
+  ],
+  "files": [
+    {
+      "path": ".github/ISSUE_TEMPLATE/bug_report.md",
+      "kind": "doc",
+      "size_bytes": 333,
+      "hash": "ececf757800e302fe0543b24851aa9f6654bc11710e95417158a88c27f93c104"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/config.yml",
+      "kind": "config",
+      "size_bytes": 27,
+      "hash": "13064e7bea658e01e718b414fbb7b3b244f36411fe25ee2055c151f7b534547a"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/feature_request.md",
+      "kind": "doc",
+      "size_bytes": 323,
+      "hash": "ac35fde4dddd415b82f4f66b76092d3663532b2aae2369d4d3dcf37e2133903b"
+    },
+    {
+      "path": ".github/workflows/ci.yml",
+      "kind": "config",
+      "size_bytes": 869,
+      "hash": "723dd8dbd1e9e6852812ba5718b1fe36dbc871043f1e3b892e2b0e4df7296477"
+    },
+    {
+      "path": ".gitignore",
+      "kind": "other",
+      "size_bytes": 106,
+      "hash": "71f9701d522504d196987129b22789ea66988ce5f0316a87e73e3f2e4c64b010"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "kind": "doc",
+      "size_bytes": 2835,
+      "hash": "9db95d70b826b772c746a0a89e4f8b9a2a654d34f77028a8702b608d25b58dcd"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "kind": "doc",
+      "size_bytes": 1212,
+      "hash": "63e96b094aa6b75d86ad7f81d8398dffd1df6768f1de110a1bda2d4dc4a74ccc"
+    },
+    {
+      "path": "LICENSE",
+      "kind": "other",
+      "size_bytes": 1075,
+      "hash": "128ee86ba593516042ec5dfaee5d107488e1cd98ffead8143e9a7e96b8fa463b"
+    },
+    {
+      "path": "README.md",
+      "kind": "doc",
+      "size_bytes": 11612,
+      "hash": "2c096b40e7433d0bea9b4641e0aedadfd143ab0725ab20c2f50fc6d05521179a"
+    },
+    {
+      "path": "ROADMAP.md",
+      "kind": "doc",
+      "size_bytes": 8778,
+      "hash": "eb95078188d6c2aac7263cd236eb0e47ba03da4ad144f348bb605245bd173536"
+    },
+    {
+      "path": "assets/01.png",
+      "kind": "other",
+      "size_bytes": 308082,
+      "hash": "5c985a23ef1743aca3cb7252def1329979b24c1b705137dd80b9c21fa52b823b"
+    },
+    {
+      "path": "assets/02.png",
+      "kind": "other",
+      "size_bytes": 589640,
+      "hash": "aab4196c5b07210d03cb56568113b3f0a2cba3313a5c9876d08343e5368323bd"
+    },
+    {
+      "path": "assets/03.png",
+      "kind": "other",
+      "size_bytes": 581063,
+      "hash": "94c548d12d590ab578483bb0d29b2eb50d0b3b00d12ba55fd4340b99f5d7b11b"
+    },
+    {
+      "path": "assets/04.png",
+      "kind": "other",
+      "size_bytes": 214839,
+      "hash": "3b5da0b5afec9e67dca8de1e324649251a8e9212b79ed37eb6a7d3549d1218b2"
+    },
+    {
+      "path": "assets/roost_logo_full.svg",
+      "kind": "other",
+      "size_bytes": 2257,
+      "hash": "c994b2ec580ba3286961ecd9b1823a04887c500c50a7e0f8b00c4e98f6e6e0ee"
+    },
+    {
+      "path": "assets/roost_logo_icon.svg",
+      "kind": "other",
+      "size_bytes": 892,
+      "hash": "1aecb06cb2fde04d88303b8045985ad0cef40831585e4b7e6bf912e7acf45ba4"
+    },
+    {
+      "path": "assets/roost_main.png",
+      "kind": "other",
+      "size_bytes": 899204,
+      "hash": "0c69cde7a902a86905eac34a4a10ef8069e9fba73cadd2c831a4ac501bbde457"
+    },
+    {
+      "path": "docs/release-checklist.md",
+      "kind": "doc",
+      "size_bytes": 1673,
+      "hash": "1be3df3340d93a7bae6b3bca680f1b2e880c5c5b8f2d2fc5f3beff80dcd8a900"
+    },
+    {
+      "path": "docs/release-notes-0.1.0.md",
+      "kind": "doc",
+      "size_bytes": 1401,
+      "hash": "c77471e940e24e4a64c1e5f5bd201b5dd03859cbb4653e018d8deec6862acba1"
+    },
+    {
+      "path": "docs/runtime-storage.md",
+      "kind": "doc",
+      "size_bytes": 7589,
+      "hash": "2ea48c6f0b0f8c18935343f7304f28d8a0f8372ca3577a629cb3dfca39504322"
+    },
+    {
+      "path": "docs/troubleshooting.md",
+      "kind": "doc",
+      "size_bytes": 4287,
+      "hash": "9cf8d7e2ddba94a457faf83d19ae5e211f3bcf05e07280109992213f7d22b2a6"
+    },
+    {
+      "path": "examples/production/README.md",
+      "kind": "doc",
+      "size_bytes": 2581,
+      "hash": "e176e36ecebf7338c478c7755aadd35b2a841ce34d04615fdee35bc8401d05ab"
+    },
+    {
+      "path": "examples/production/docker-compose.yml",
+      "kind": "config",
+      "size_bytes": 568,
+      "hash": "b9d4b017fe3ff27dadbd7ff645b198a93494389828b3e8b074971b323fbe0779"
+    },
+    {
+      "path": "examples/production/roost.toml",
+      "kind": "config",
+      "size_bytes": 412,
+      "hash": "404de79224e89bd831fa17cb60da8bb9d0fbdcfd9fa297d45a111a9ab8e43757"
+    },
+    {
+      "path": "pyproject.toml",
+      "kind": "config",
+      "size_bytes": 995,
+      "hash": "7bda8852f21d77d02cda3bb8cd5db8df3a4cababb6ae3608284a80f51908a48b"
+    },
+    {
+      "path": "scripts/e2e_postgres_migrate.sh",
+      "kind": "other",
+      "size_bytes": 9002,
+      "hash": "9d25d41ac0c9709d54fbd74f4cd85f1815881fc0424645be49fc4bdab12087f9"
+    },
+    {
+      "path": "scripts/e2e_postgres_watchlist.sh",
+      "kind": "other",
+      "size_bytes": 11480,
+      "hash": "74089572e7277625aeaf42dfec72142d0f78049a28f0193f241f88132ab51843"
+    },
+    {
+      "path": "scripts/e2e_watchlist.sh",
+      "kind": "other",
+      "size_bytes": 4252,
+      "hash": "ef3346542facf07002c1673412fe4ae1798757fb75bc457a4f1b36a77da256dc"
+    },
+    {
+      "path": "src/roost/__init__.py",
+      "kind": "source",
+      "size_bytes": 49,
+      "hash": "e2dfdcaf386b2ee9befa8ca8c14331b63053cd4b56a7ba114c5db67b012f246e"
+    },
+    {
+      "path": "src/roost/cli.py",
+      "kind": "source",
+      "size_bytes": 44547,
+      "hash": "7407a52d5b7ae8817c7528ebd944b60086bf8e94f9a5756bcc2aa3de16fb4069"
+    },
+    {
+      "path": "src/roost/engines/__init__.py",
+      "kind": "source",
+      "size_bytes": 48,
+      "hash": "ce143f8ae8130af46551a41a21321f9aa54f13ee1bbf926bf43e5d590ef187f4"
+    },
+    {
+      "path": "src/roost/engines/demo/__init__.py",
+      "kind": "source",
+      "size_bytes": 61,
+      "hash": "3a705e6399a75ea9620a03b4b5f7c6573e6454c26240512a3165a13ac6d7c05e"
+    },
+    {
+      "path": "src/roost/engines/demo/engine.py",
+      "kind": "source",
+      "size_bytes": 2070,
+      "hash": "335cf33810b843a4a558ec259f87db8a6e2cb7e4e8174a5ea028c1aa27a2441a"
+    },
+    {
+      "path": "src/roost/engines/watchlist/__init__.py",
+      "kind": "source",
+      "size_bytes": 97,
+      "hash": "3e5a2b60247bfd147af107e75a2243e9be7e0d385c6acd8e2bbae78ee2487982"
+    },
+    {
+      "path": "src/roost/engines/watchlist/engine.py",
+      "kind": "source",
+      "size_bytes": 6832,
+      "hash": "9e2d53d8e3bba56227c760e0ac03ed3e4edf0f2c53f465c53c72ef7a370b2c25"
+    },
+    {
+      "path": "src/roost/runtime/__init__.py",
+      "kind": "source",
+      "size_bytes": 621,
+      "hash": "191a3053eda284284fd9ebe1b5ac2dba340bf1a35a8c098bf81aeaabf5cad7dc"
+    },
+    {
+      "path": "src/roost/runtime/artifacts.py",
+      "kind": "source",
+      "size_bytes": 3542,
+      "hash": "c4e3741580d4411fbd98f8c84539cec297958cba7ec94e44bc9a82b89780971f"
+    },
+    {
+      "path": "src/roost/runtime/backends/__init__.py",
+      "kind": "source",
+      "size_bytes": 59,
+      "hash": "3c015ec9c3f73abc9aa72e020fac37415c3b455da278b2cc1d48cdf15502b776"
+    },
+    {
+      "path": "src/roost/runtime/backends/postgres/__init__.py",
+      "kind": "source",
+      "size_bytes": 804,
+      "hash": "6b823009cade623e5f076fb4f704686da9900cadc87774cab065f82d12d8e5a9"
+    },
+    {
+      "path": "src/roost/runtime/backends/postgres/manager.py",
+      "kind": "source",
+      "size_bytes": 4429,
+      "hash": "b9f0f805fe16985e6e5968b69155e22848bd197b0746691d13b66e928234b725"
+    },
+    {
+      "path": "src/roost/runtime/backends/postgres/migrations/0001_initial.sql",
+      "kind": "source",
+      "size_bytes": 4451,
+      "hash": "b137a284e71c9cc5a8e98d3ead0e56e583ea4c14fb5f0fa36a3e024919374570"
+    },
+    {
+      "path": "src/roost/runtime/backends/postgres/migrations/__init__.py",
+      "kind": "source",
+      "size_bytes": 43,
+      "hash": "69fedf334f56877820e1a7b8095e7a1e0c8e024d7ff0dcc44981612b72c6ed07"
+    },
+    {
+      "path": "src/roost/runtime/backends/postgres/stores.py",
+      "kind": "source",
+      "size_bytes": 28699,
+      "hash": "bcd8c9c68e9718e868e8f2c7d446dfbbaab30f365fa9d0eac5132b9e089d1c0b"
+    },
+    {
+      "path": "src/roost/runtime/backends/redis.py",
+      "kind": "source",
+      "size_bytes": 20840,
+      "hash": "c6c8d206bd0519f9053d4c5de70cfb321e709d9162d85a3b5dd1175292354415"
+    },
+    {
+      "path": "src/roost/runtime/config.py",
+      "kind": "source",
+      "size_bytes": 3505,
+      "hash": "e05eb225c7f8cf82fadc4d03c0f2239ba07b6fd9dda80d6571d630ccd7c17445"
+    },
+    {
+      "path": "src/roost/runtime/engine.py",
+      "kind": "source",
+      "size_bytes": 477,
+      "hash": "035fb3f6629ba1519c6987d73d395bbef6a32e44981da66a10bdf7eca7360cd8"
+    },
+    {
+      "path": "src/roost/runtime/models.py",
+      "kind": "source",
+      "size_bytes": 1906,
+      "hash": "d454c1cbaae02fd0a074dee933b3edc6313f7686d7e3c6ed560ab7d8e1f968b1"
+    },
+    {
+      "path": "src/roost/runtime/namespacing.py",
+      "kind": "source",
+      "size_bytes": 2091,
+      "hash": "d12ad14a534034ff7b41455047bfe331c3d8befd775d307603217ef4d18f8750"
+    },
+    {
+      "path": "src/roost/runtime/registry.py",
+      "kind": "source",
+      "size_bytes": 3880,
+      "hash": "41da8884e33442f22921031b376e07e42cdcbe0ca7e4ddae186f98f5d596387e"
+    },
+    {
+      "path": "src/roost/runtime/stores.py",
+      "kind": "source",
+      "size_bytes": 3398,
+      "hash": "1e6213411bcf6937f568f0cd45a004fcd2b5bc9716480413a646f1642a718fa6"
+    },
+    {
+      "path": "src/roost/runtime/swarm.py",
+      "kind": "source",
+      "size_bytes": 27512,
+      "hash": "9952317a01c6a3b5cd25d5dc038b14e863ddb5135a2970da8877dda402ff8d74"
+    },
+    {
+      "path": "src/roost/runtime/workspaces.py",
+      "kind": "source",
+      "size_bytes": 4245,
+      "hash": "1e435f93ab6ccefbd139d1fd8fcde48b7c593ea5aea212ffa66601c7c84f5445"
+    },
+    {
+      "path": "src/roost/ui/__init__.py",
+      "kind": "source",
+      "size_bytes": 36,
+      "hash": "1753a52d10f26f210d8a1bd98a8bc8b6b4269a7f094b9eb2dce63de7a2da7e38"
+    },
+    {
+      "path": "src/roost/ui/server.py",
+      "kind": "source",
+      "size_bytes": 22487,
+      "hash": "a3e3b01f559b0f048ff61dcd2b91ecfef430a0c71f3df55f238f6a84eaaaf893"
+    },
+    {
+      "path": "src/roost/ui/static/app.css",
+      "kind": "other",
+      "size_bytes": 16523,
+      "hash": "0a06f855b8912ca6e8f6f08f5147d34b171859b6c3af71b0e4eb483df374f4da"
+    },
+    {
+      "path": "src/roost/ui/static/app.js",
+      "kind": "other",
+      "size_bytes": 14489,
+      "hash": "f9a23c6a48a408136dc2eb2db226d082b80f34db88b7c6fff0e49b7828fb0112"
+    },
+    {
+      "path": "src/roost/ui/static/index.html",
+      "kind": "other",
+      "size_bytes": 7188,
+      "hash": "e42df4f8361347667f392f1841670fed3394b539ed6645d689adf1ee98645a50"
+    },
+    {
+      "path": "src/roost/ui/static/tokens.css",
+      "kind": "other",
+      "size_bytes": 2337,
+      "hash": "1da4ba0f70fb9d7bf237bfe972e35ba8ec61be9967c9ca43ca97fae8802a098b"
+    },
+    {
+      "path": "tests/test_cli_config.py",
+      "kind": "test",
+      "size_bytes": 6336,
+      "hash": "26115df7c7588e3a3a2dd2034e294f4464c78fb5edbe780f6e491d0c31141175"
+    },
+    {
+      "path": "tests/test_demo_engine.py",
+      "kind": "test",
+      "size_bytes": 739,
+      "hash": "12e4686d0491ae3c94a3dead3f162aed21b3a1b6c221625142c87c6defbbc783"
+    },
+    {
+      "path": "tests/test_postgres_migrations.py",
+      "kind": "test",
+      "size_bytes": 2051,
+      "hash": "c663640bec9676725bd66d97f8f6a13ec51ea63a976ffcebdf3c15f6a278bcda"
+    },
+    {
+      "path": "tests/test_runtime_primitives.py",
+      "kind": "test",
+      "size_bytes": 3246,
+      "hash": "c28c8839d36a13b2f85dfb9ab57c517e6bb0a87704982bfd8d1a8bebbe31b7bc"
+    },
+    {
+      "path": "tests/test_ui_console.py",
+      "kind": "test",
+      "size_bytes": 978,
+      "hash": "a5687f63f859ba4d44c4785f01f4099aea6cec3804ebea8445eaf5b0be17168a"
+    },
+    {
+      "path": "tests/test_watchlist_engine.py",
+      "kind": "test",
+      "size_bytes": 2947,
+      "hash": "baa90c034e1709de34581dd820167323a3d5881ebfd1b8bb4db2b227a0d47113"
+    },
+    {
+      "path": "uv.lock",
+      "kind": "config",
+      "size_bytes": 67975,
+      "hash": "4c290926ecf0cbc90d737f9475b49f5c7ca5c016cb71ba8453710d3398faeabf"
+    }
+  ]
+}

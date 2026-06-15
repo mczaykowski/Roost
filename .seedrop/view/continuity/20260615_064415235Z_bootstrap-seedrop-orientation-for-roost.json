@@ -1,0 +1,24 @@
+{
+  "schema_version": "1.0",
+  "id": "70abbb6f-d6c5-443c-8c8e-dea408d8ecd4",
+  "created_at": "2026-06-15T06:44:15.235Z",
+  "agent": "claude",
+  "mission": "Bootstrap seedrop orientation for Roost",
+  "summary": "Wired ZCode MCP config (opencode schema), created zcode passport, authored policy.json with 21 path purposes + 5 working agreements, rebuilt manifest from git-tracked files (65, not .venv bloat), added 5 recommended reads. Known gaps: seed view sync ignores .gitignore (bloats manifest); policy.verification_commands override not surfacing in brief (falls back to python -m pytest default).",
+  "decisions": [],
+  "assumptions": [],
+  "open_threads": [],
+  "validation": {
+    "status": "unknown",
+    "commands": []
+  },
+  "changed_paths": [],
+  "git_status": {
+    "is_repo": true,
+    "is_dirty": true,
+    "uncommitted_count": 1,
+    "uncommitted_paths": [
+      ".seedrop/"
+    ]
+  }
+}
