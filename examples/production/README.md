@@ -69,7 +69,7 @@ What to look for:
 - `list` shows durable work metadata from Postgres.
 - `events` shows the runtime history.
 - `workers` shows active or stale worker heartbeats.
-- `dlq list` shows failed work that needs replay or acknowledgement.
+- `dlq list` shows failed work that needs re-run from the latest snapshot or acknowledgement.
 
 ## Troubleshooting
 

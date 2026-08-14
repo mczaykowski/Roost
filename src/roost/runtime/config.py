@@ -4,7 +4,7 @@ import os
 import tomllib
 from typing import Literal, Optional, Tuple
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 DEFAULT_REDIS_URL = "redis://localhost:6379/0"
 DEFAULT_QUEUE = "default"
@@ -12,14 +12,83 @@ DEFAULT_REDIS_PREFIX = "roost"
 DEFAULT_WORKSPACE_MODE = "worktree"
 DEFAULT_RUNTIME_MODE = "simple"
 
+_SNAPSHOT_DATA_PREFIX = "snapshot.data."
+_ITEM_PAYLOAD_PREFIX = "item.payload."
+
+
+def validate_trigger_path(path: str, *, field: str = "condition") -> None:
+    """
+    Freeze the trigger path contract to a single key lookup.
+
+    Allowed forms: ``snapshot.data.<key>``, ``item.payload.<key>``, or a bare
+    key (looked up in ``snapshot.data``). Nested paths are rejected.
+    """
+    if not path:
+        raise ValueError(f"Trigger {field} must be a non-empty path")
+    if path.startswith(_SNAPSHOT_DATA_PREFIX):
+        rest = path[len(_SNAPSHOT_DATA_PREFIX) :]
+    elif path.startswith(_ITEM_PAYLOAD_PREFIX):
+        rest = path[len(_ITEM_PAYLOAD_PREFIX) :]
+    else:
+        rest = path
+    if not rest or "." in rest:
+        raise ValueError(
+            f"Trigger {field} {path!r} is not a single-level key. "
+            "Allowed forms: snapshot.data.<key>, item.payload.<key>, or a bare key"
+        )
+
+
+def resolve_trigger_path(
+    path: str, *, snapshot_data: dict, item_payload: dict, field: str = "condition"
+) -> object:
+    """Resolve a frozen one-level trigger path. Raises ValueError if nested."""
+    validate_trigger_path(path, field=field)
+    if path.startswith(_SNAPSHOT_DATA_PREFIX):
+        return snapshot_data.get(path[len(_SNAPSHOT_DATA_PREFIX) :])
+    if path.startswith(_ITEM_PAYLOAD_PREFIX):
+        return item_payload.get(path[len(_ITEM_PAYLOAD_PREFIX) :])
+    return snapshot_data.get(path)
+
 
 class TriggerConfig(BaseModel):
+    """
+    Fan-out rule: when ``on_engine_done`` finishes, enqueue ``enqueue_engine``.
+
+    A trigger fires when ``condition`` is omitted, or when it names a single key
+    that is truthy. Allowed condition (and ``payload_map`` source) forms:
+
+    - ``snapshot.data.<one_key>``
+    - ``item.payload.<one_key>``
+    - a bare key, looked up in ``snapshot.data``
+
+    Nested paths (extra dots after the prefix, e.g. ``snapshot.data.foo.bar``)
+    are rejected at config-load and plan time. ``payload_map`` copies matching
+    keys under the same one-level rule.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     on_engine_done: str
     enqueue_engine: str
     condition: Optional[str] = None
     payload_map: Optional[dict[str, str]] = None
+
+    @field_validator("condition")
+    @classmethod
+    def _condition_single_level(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None:
+            validate_trigger_path(value, field="condition")
+        return value
+
+    @field_validator("payload_map")
+    @classmethod
+    def _payload_map_single_level(
+        cls, value: Optional[dict[str, str]]
+    ) -> Optional[dict[str, str]]:
+        if value:
+            for source in value.values():
+                validate_trigger_path(source, field="payload_map")
+        return value
 
 
 class RedisRuntimeConfig(BaseModel):

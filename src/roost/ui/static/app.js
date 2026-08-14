@@ -251,7 +251,7 @@ function eventText(row) {
   if (row.kind === "dlq_pushed") return "Moved to failed work";
   if (row.kind === "work_retry_requested") return "Retry requested";
   if (row.kind === "work_cancelled") return "Cancelled";
-  if (row.kind === "dlq_replay_requested") return "DLQ replay requested";
+  if (row.kind === "dlq_replay_requested") return "DLQ re-run requested";
   return row.kind || "Runtime event";
 }
 
@@ -277,7 +277,7 @@ function renderFailed(rows, dlq) {
         row.source === "dlq"
           ? `
             <div class="row-actions">
-              <button class="action-button" data-dlq-replay="${row.index}">Replay</button>
+              <button class="action-button" data-dlq-replay="${row.index}">Re-run</button>
               <button class="action-button action-muted" data-dlq-ack="${row.index}">Ack</button>
             </div>
           `

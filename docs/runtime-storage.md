@@ -68,7 +68,7 @@ customers and need durable operational history.
 Production mode optimizes for:
 
 - queryable work history
-- audit trail
+- event history
 - retention policy
 - incident debugging
 - worker fleet visibility
@@ -113,7 +113,7 @@ Postgres owns durable operational memory:
 - work item records
 - latest work metadata
 - snapshots
-- snapshot history, where configured
+- snapshot history (later; optional)
 - event history
 - dead-letter records
 - worker heartbeats
@@ -121,9 +121,9 @@ Postgres owns durable operational memory:
 - verticals
 - environments
 - worker groups
-- operator actions
+- operator actions (later)
 - retention policy state
-- audit log
+- audit log (later)
 
 Postgres is the right tool for data that is:
 
@@ -206,7 +206,7 @@ Roost should keep these guarantees consistent across storage modes:
 - best-effort resource isolation
 - bounded retries
 - dead-letter visibility
-- operator retry/cancel/replay controls
+- operator retry/cancel/re-run controls
 - inspectable work state
 
 Postgres does not change the engine contract. Engines should still implement:

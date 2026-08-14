@@ -24,6 +24,20 @@ Postgres for durable operational memory.
 - Postgres e2e scripts for migration idempotency and production-mode
   crash/resume.
 - CI coverage for Redis e2e, Postgres migrations, and production-mode e2e.
+- Postgres connection pool so lease renew and snapshot save can run concurrently.
+- Per-step Postgres transaction so snapshot, meta, events, and child links commit together.
+- Postgres-native orphan recovery (Redis inflight is a hint, not the discovery set).
+- Atomic resource claims (`INSERT … ON CONFLICT … WHERE expired or same owner`).
+- `roost_work_meta.children` (migration 0002) so `link_child` matches simple mode.
+- Operator action records from CLI/console cancel, retry, and DLQ commands; `roost actions`.
+- Optional Prometheus counters scraped at `GET /metrics` on the console (`[metrics]` extra).
+
+### Changed
+
+- Docs and operator labels now say `dlq replay` re-enqueues from the latest
+  snapshot; step-by-step snapshot history remains on the roadmap.
+- Trigger conditions are a frozen one-level key lookup (`snapshot.data.<key>` /
+  `item.payload.<key>` / bare key). Nested paths are rejected.
 
 ### Operational Notes
 

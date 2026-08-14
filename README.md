@@ -17,7 +17,7 @@ The moment an agent leaves a notebook or chat session, the hard problems change:
 - Can another worker resume after a crash?
 - Which resources are locked?
 - What did the agent produce?
-- Can operators inspect, retry, replay, or dead-letter the work?
+- Can operators inspect, retry, re-run from the last step, or dead-letter the work?
 
 Roost exists for that layer.
 
@@ -149,9 +149,9 @@ uv run roost ui
 ```
 
 Open `http://127.0.0.1:8766` to see live work, recent events, failed work, and
-JSON artifacts. The console can also retry, cancel, replay, and acknowledge
-work, using the same Redis prefix, namespace, and artifact root settings as the
-CLI. It is local-only by default.
+JSON artifacts. The console can also retry, cancel, re-run from the last step,
+and acknowledge work, using the same Redis prefix, namespace, and artifact root
+settings as the CLI. It is local-only by default.
 
 ![Roost Console work view](assets/01.png)
 
@@ -199,7 +199,9 @@ uv run roost dlq list --config examples/production/roost.toml
 
 `roost doctor` is the setup confidence check. In production mode it verifies
 Redis, Postgres connectivity, packaged migrations, engines, artifacts, and
-workspace paths.
+workspace paths. Optional Prometheus metrics (`uv sync --extra metrics`) are
+scraped at `GET /metrics` on the console; `roost doctor` reports whether the
+extra is installed.
 
 ## Engine Contract
 
@@ -261,7 +263,7 @@ uv run roost enqueue --engine my-engine --payload '{"task":"ship it"}'
 ## What Roost Provides
 
 - `WorkItem`: durable unit of work.
-- `Snapshot`: replayable engine state after each step.
+- `Snapshot`: durable engine state after each step (re-runnable from the last step).
 - `Lease`: time-bound worker ownership.
 - `Artifact`: content-addressed output produced by an engine.
 - `Engine`: small async contract for pluggable execution.
@@ -298,6 +300,7 @@ uv run roost inspect <work_id>
 uv run roost list
 uv run roost events
 uv run roost workers
+uv run roost actions
 uv run roost retry <work_id>
 uv run roost cancel <work_id>
 uv run roost dlq list
@@ -307,6 +310,10 @@ uv run roost ui
 uv run roost migrate --plan
 uv run roost workspace-path <work_id>
 ```
+
+`roost dlq replay` re-enqueues dead-lettered work from its latest snapshot; it
+is not a historical step-by-step replay. Full snapshot history is on the
+[ROADMAP](ROADMAP.md).
 
 Useful environment variables:
 
@@ -322,7 +329,7 @@ environment variables, and environment variables override `roost.toml`.
 
 Postgres durable storage is available behind explicit production-mode commands
 for work items, snapshots, leases, resource claims, events, DLQ, operator
-metadata, artifact metadata, and worker heartbeats. To inspect packaged
+action records, artifact metadata, and worker heartbeats. To inspect packaged
 migrations:
 
 ```bash

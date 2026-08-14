@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import os
 import time
 import uuid
@@ -49,6 +50,29 @@ def _require_redis_deps() -> None:
             "Missing Redis runtime dependencies. Install with:\n"
             "  uv sync --extra redis\n"
             f"Missing: {', '.join(missing)}"
+        )
+
+
+async def _record_operator_action(
+    postgres: Any,
+    *,
+    action: str,
+    work_id: str | None,
+    actor: str = "cli",
+    payload: dict[str, Any] | None = None,
+) -> None:
+    """Best-effort audit write; never fails the operator command."""
+    if postgres is None:
+        return
+    try:
+        from roost.runtime.backends.postgres import PostgresOperatorActionStore
+
+        await PostgresOperatorActionStore(postgres).record(
+            action, work_id, actor, payload or {}
+        )
+    except Exception:
+        logging.getLogger("roost").exception(
+            "failed to record operator action %s for work_id=%s", action, work_id
         )
 
 
@@ -221,11 +245,14 @@ def _cmd_enqueue(args: argparse.Namespace) -> None:
         try:
             if args.runtime_mode == "production":
                 _require_postgres_runtime(args)
-                import psycopg
 
-                from roost.runtime.backends.postgres import PostgresControlPlaneStore, PostgresWorkItemStore
+                from roost.runtime.backends.postgres import (
+                    PostgresControlPlaneStore,
+                    PostgresWorkItemStore,
+                    connect_postgres_pool,
+                )
 
-                postgres = await psycopg.AsyncConnection.connect(args.postgres_url)
+                postgres = await connect_postgres_pool(args.postgres_url)
                 store = PostgresWorkItemStore(postgres)
                 control = PostgresControlPlaneStore(postgres)
             else:
@@ -335,15 +362,14 @@ def _cmd_status(args: argparse.Namespace) -> None:
         try:
             if args.runtime_mode == "production":
                 _require_postgres_runtime(args)
-                import psycopg
-
                 from roost.runtime.backends.postgres import (
                     PostgresControlPlaneStore,
                     PostgresSnapshotStore,
                     PostgresWorkItemStore,
+                    connect_postgres_pool,
                 )
 
-                postgres = await psycopg.AsyncConnection.connect(args.postgres_url)
+                postgres = await connect_postgres_pool(args.postgres_url)
                 control = PostgresControlPlaneStore(postgres)
                 snapshots = PostgresSnapshotStore(postgres)
                 items = PostgresWorkItemStore(postgres)
@@ -390,16 +416,15 @@ def _cmd_inspect(args: argparse.Namespace) -> None:
         try:
             if args.runtime_mode == "production":
                 _require_postgres_runtime(args)
-                import psycopg
-
                 from roost.runtime.backends.postgres import (
                     PostgresControlPlaneStore,
                     PostgresLeaseStore,
                     PostgresSnapshotStore,
                     PostgresWorkItemStore,
+                    connect_postgres_pool,
                 )
 
-                postgres = await psycopg.AsyncConnection.connect(args.postgres_url)
+                postgres = await connect_postgres_pool(args.postgres_url)
                 control = PostgresControlPlaneStore(postgres)
                 snapshots = PostgresSnapshotStore(postgres)
                 items = PostgresWorkItemStore(postgres)
@@ -448,11 +473,13 @@ def _cmd_retry(args: argparse.Namespace) -> None:
         try:
             if args.runtime_mode == "production":
                 _require_postgres_runtime(args)
-                import psycopg
+                from roost.runtime.backends.postgres import (
+                    PostgresControlPlaneStore,
+                    PostgresWorkItemStore,
+                    connect_postgres_pool,
+                )
 
-                from roost.runtime.backends.postgres import PostgresControlPlaneStore, PostgresWorkItemStore
-
-                postgres = await psycopg.AsyncConnection.connect(args.postgres_url)
+                postgres = await connect_postgres_pool(args.postgres_url)
                 items = PostgresWorkItemStore(postgres)
                 control = PostgresControlPlaneStore(postgres)
             else:
@@ -478,6 +505,12 @@ def _cmd_retry(args: argparse.Namespace) -> None:
                     "engine": item.engine,
                     "delay_seconds": args.delay_seconds,
                 }
+            )
+            await _record_operator_action(
+                postgres,
+                action="retry",
+                work_id=args.work_id,
+                payload={"engine": item.engine, "delay_seconds": args.delay_seconds},
             )
             print(json.dumps({"work_id": args.work_id, "state": "queued"}, indent=2, sort_keys=True))
         finally:
@@ -511,16 +544,15 @@ def _cmd_cancel(args: argparse.Namespace) -> None:
         try:
             if args.runtime_mode == "production":
                 _require_postgres_runtime(args)
-                import psycopg
-
                 from roost.runtime.backends.postgres import (
                     PostgresControlPlaneStore,
                     PostgresLeaseStore,
                     PostgresResourceStore,
                     PostgresWorkItemStore,
+                    connect_postgres_pool,
                 )
 
-                postgres = await psycopg.AsyncConnection.connect(args.postgres_url)
+                postgres = await connect_postgres_pool(args.postgres_url)
                 items = PostgresWorkItemStore(postgres)
                 control = PostgresControlPlaneStore(postgres)
                 lease_store = PostgresLeaseStore(postgres)
@@ -553,6 +585,17 @@ def _cmd_cancel(args: argparse.Namespace) -> None:
                     "resources_cleared": resources_cleared,
                 }
             )
+            await _record_operator_action(
+                postgres,
+                action="cancel",
+                work_id=args.work_id,
+                payload={
+                    "engine": item.engine,
+                    "reason": args.reason,
+                    "leases_cleared": leases_cleared,
+                    "resources_cleared": resources_cleared,
+                },
+            )
             print(json.dumps(meta, indent=2, sort_keys=True, default=str))
         finally:
             if postgres:
@@ -579,11 +622,13 @@ def _cmd_dlq(args: argparse.Namespace) -> None:
         try:
             if args.runtime_mode == "production":
                 _require_postgres_runtime(args)
-                import psycopg
+                from roost.runtime.backends.postgres import (
+                    PostgresControlPlaneStore,
+                    PostgresWorkItemStore,
+                    connect_postgres_pool,
+                )
 
-                from roost.runtime.backends.postgres import PostgresControlPlaneStore, PostgresWorkItemStore
-
-                postgres = await psycopg.AsyncConnection.connect(args.postgres_url)
+                postgres = await connect_postgres_pool(args.postgres_url)
                 control = PostgresControlPlaneStore(postgres)
                 items = PostgresWorkItemStore(postgres)
             else:
@@ -604,6 +649,13 @@ def _cmd_dlq(args: argparse.Namespace) -> None:
 
             if args.dlq_cmd == "ack":
                 ok = await control.ack_dlq(args.index)
+                if ok:
+                    await _record_operator_action(
+                        postgres,
+                        action="dlq_ack",
+                        work_id=work_id,
+                        payload={"index": args.index},
+                    )
                 print(json.dumps({"acked": ok, "index": args.index}, indent=2, sort_keys=True))
                 return
 
@@ -630,6 +682,12 @@ def _cmd_dlq(args: argparse.Namespace) -> None:
                     "acked": acked,
                 }
             )
+            await _record_operator_action(
+                postgres,
+                action="dlq_replay",
+                work_id=work_id,
+                payload={"engine": item.engine, "index": args.index, "acked": acked},
+            )
             print(json.dumps({"work_id": work_id, "state": "queued", "acked": acked}, indent=2, sort_keys=True))
         finally:
             if postgres:
@@ -655,11 +713,10 @@ def _cmd_list(args: argparse.Namespace) -> None:
         try:
             if args.runtime_mode == "production":
                 _require_postgres_runtime(args)
-                import psycopg
 
-                from roost.runtime.backends.postgres import PostgresControlPlaneStore
+                from roost.runtime.backends.postgres import PostgresControlPlaneStore, connect_postgres_pool
 
-                postgres = await psycopg.AsyncConnection.connect(args.postgres_url)
+                postgres = await connect_postgres_pool(args.postgres_url)
                 control = PostgresControlPlaneStore(postgres)
             else:
                 control = RedisControlPlane(redis, keys=keys)
@@ -694,11 +751,10 @@ def _cmd_events(args: argparse.Namespace) -> None:
         try:
             if args.runtime_mode == "production":
                 _require_postgres_runtime(args)
-                import psycopg
 
-                from roost.runtime.backends.postgres import PostgresControlPlaneStore
+                from roost.runtime.backends.postgres import PostgresControlPlaneStore, connect_postgres_pool
 
-                postgres = await psycopg.AsyncConnection.connect(args.postgres_url)
+                postgres = await connect_postgres_pool(args.postgres_url)
                 control = PostgresControlPlaneStore(postgres)
             else:
                 control = RedisControlPlane(redis, keys=keys)
@@ -732,11 +788,13 @@ def _cmd_workers(args: argparse.Namespace) -> None:
             return
 
         _require_postgres_runtime(args)
-        import psycopg
 
-        from roost.runtime.backends.postgres import PostgresWorkerHeartbeatStore
+        from roost.runtime.backends.postgres import (
+            PostgresWorkerHeartbeatStore,
+            open_postgres_pool,
+        )
 
-        async with await psycopg.AsyncConnection.connect(args.postgres_url) as postgres:
+        async with open_postgres_pool(args.postgres_url) as postgres:
             rows = await PostgresWorkerHeartbeatStore(postgres).list_workers(
                 limit=args.limit,
                 stale_after_seconds=args.stale_after,
@@ -748,6 +806,45 @@ def _cmd_workers(args: argparse.Namespace) -> None:
                     "stale_after_seconds": args.stale_after,
                     "rows": rows,
                 },
+                indent=2,
+                sort_keys=True,
+                default=str,
+            )
+        )
+
+    asyncio.run(run())
+
+
+def _cmd_actions(args: argparse.Namespace) -> None:
+    _apply_runtime_config(args)
+
+    async def run() -> None:
+        if args.runtime_mode != "production":
+            print(
+                json.dumps(
+                    {"runtime_mode": args.runtime_mode, "rows": []},
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+            return
+
+        _require_postgres_runtime(args)
+
+        from roost.runtime.backends.postgres import (
+            PostgresOperatorActionStore,
+            open_postgres_pool,
+        )
+
+        async with open_postgres_pool(args.postgres_url) as postgres:
+            store = PostgresOperatorActionStore(postgres)
+            if args.work_id:
+                rows = await store.list_for_work(args.work_id, limit=args.limit)
+            else:
+                rows = await store.list_recent(limit=args.limit)
+        print(
+            json.dumps(
+                {"runtime_mode": args.runtime_mode, "rows": rows},
                 indent=2,
                 sort_keys=True,
                 default=str,
@@ -974,6 +1071,13 @@ def _cmd_doctor(args: argparse.Namespace) -> None:
         _doctor_line("FAIL", "workspace", f"parent is not writable: {workspace_parent}")
 
     _doctor_line("OK", "queue", args.queue)
+    from roost.runtime.metrics import enabled as metrics_enabled
+
+    if metrics_enabled():
+        _doctor_line("OK", "metrics", "enabled")
+    else:
+        warnings += 1
+        _doctor_line("WARN", "metrics", "install roost-runtime[metrics]")
     if failures:
         print(f"\n{failures} check(s) failed.")
         raise SystemExit(1)
@@ -1081,7 +1185,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--reason")
     p.set_defaults(fn=_cmd_cancel)
 
-    p = sub.add_parser("dlq", help="List, replay, or acknowledge dead-lettered work")
+    p = sub.add_parser("dlq", help="List, re-enqueue from latest snapshot, or acknowledge dead-lettered work")
     dlq_sub = p.add_subparsers(dest="dlq_cmd", required=True)
 
     dlq_list = dlq_sub.add_parser("list", help="List dead-letter entries")
@@ -1090,7 +1194,7 @@ def build_parser() -> argparse.ArgumentParser:
     dlq_list.add_argument("--offset", type=int, default=0)
     dlq_list.set_defaults(fn=_cmd_dlq)
 
-    dlq_replay = dlq_sub.add_parser("replay", help="Re-enqueue a dead-letter entry by index")
+    dlq_replay = dlq_sub.add_parser("replay", help="Re-enqueue a dead-letter entry from its latest snapshot")
     _add_redis_args(dlq_replay, production=True)
     dlq_replay.add_argument("index", type=int)
     dlq_replay.add_argument("--ack", action="store_true", help="Remove the DLQ entry after enqueueing")
@@ -1122,6 +1226,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--limit", type=int, default=100)
     p.add_argument("--stale-after", type=int, default=30)
     p.set_defaults(fn=_cmd_workers)
+
+    p = sub.add_parser("actions", help="List operator action records")
+    _add_postgres_args(p)
+    p.add_argument("--work-id")
+    p.add_argument("--limit", type=int, default=50)
+    p.set_defaults(fn=_cmd_actions)
 
     p = sub.add_parser("workspace-path", help="Print the isolated workspace path for a work id")
     _add_config_arg(p)

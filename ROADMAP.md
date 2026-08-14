@@ -47,8 +47,9 @@ Roost now has the first production-shaped OSS foundation in place:
 - CI exercises Redis e2e, Postgres migrations, and production-mode crash/resume.
 
 The remaining roadmap is about making that foundation more complete for teams:
-retention, backup/restore guidance, stronger audit trails, object storage,
-environment separation, and eventually cloud control-plane workflows.
+snapshot history beyond the latest accepted snapshot, retention, backup/restore
+guidance, stronger audit trails, object storage, environment separation, and
+eventually cloud control-plane workflows.
 
 ## Phase 0: Make The Project Legible
 
@@ -95,8 +96,8 @@ Ship:
 
 Gate:
 
-- Killing a worker mid-step, restarting infrastructure, and replaying failed
-  work behaves predictably and is covered by tests.
+- Killing a worker mid-step, restarting infrastructure, and re-running failed
+  work from its latest snapshot behaves predictably and is covered by tests.
 
 ## Phase 2: Plug-And-Play Operator Experience
 
@@ -109,7 +110,7 @@ Ship:
   storage, and worker health. Shipped for core local and production setup.
 - `roost dev` for local demo/runtime startup.
 - CLI commands for inspect, retry, cancel, resume, list dead-lettered work,
-  replay dead-lettered work, worker heartbeats, and view artifacts. Shipped for
+  re-enqueue dead-lettered work from its latest snapshot, worker heartbeats, and view artifacts. Shipped for
   the current operator surface except a separate `resume` command.
 - A local console with work list, detail view, snapshot timeline, artifacts,
   events, retry controls, failed work, and worker status. Shipped as a local

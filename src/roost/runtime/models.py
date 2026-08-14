@@ -43,7 +43,10 @@ class WorkItem(BaseModel):
 
 
 class Snapshot(BaseModel):
-    """A replayable, versioned snapshot for preemptible execution."""
+    """A durable, versioned snapshot for preemptible execution.
+
+    Re-runnable from the last step; not a history log of past snapshots.
+    """
 
     work_id: str
     engine: str = "demo"

@@ -126,7 +126,8 @@ List failed work that reached the dead-letter queue:
 uv run roost dlq list
 ```
 
-Replay the first entry and remove it from the queue after it is enqueued:
+Re-enqueue the first dead-letter entry from its latest snapshot, then remove it
+from the queue:
 
 ```bash
 uv run roost dlq replay 0 --ack

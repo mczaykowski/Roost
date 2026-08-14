@@ -4,7 +4,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from redis import asyncio as aioredis
 
@@ -195,11 +195,16 @@ class RedisWorkItemStore(WorkItemStore):
             return None
         return WorkItem.model_validate_json(raw)
 
-    async def get_or_claim_work_id(self, item: WorkItem, ttl_seconds: int = 7 * 24 * 3600) -> str:
+    async def get_or_claim_work_id(
+        self, item: WorkItem, ttl_seconds: int = 7 * 24 * 3600, *, conn: Any = None
+    ) -> str:
         """
         If an idempotency_key is provided, ensure enqueue is de-duplicated.
         Returns the canonical work_id.
+
+        ``conn`` is ignored: Redis stores are not transactional.
         """
+        del conn
         if not item.idempotency_key:
             await self.put(item, ttl_seconds=ttl_seconds)
             return item.work_id
@@ -253,13 +258,22 @@ class RedisSnapshotStore(SnapshotStore):
             """
         )
 
-    async def load(self, work_id: str) -> Optional[Snapshot]:
+    async def load(self, work_id: str, *, conn: Any = None) -> Optional[Snapshot]:
+        del conn  # Redis stores are not transactional.
         raw = await self.redis.get(self.keys.snapshot(work_id))
         if not raw:
             return None
         return Snapshot.model_validate_json(raw)
 
-    async def save(self, snapshot: Snapshot, expected_version: int, ttl_seconds: int = 24 * 3600) -> bool:
+    async def save(
+        self,
+        snapshot: Snapshot,
+        expected_version: int,
+        ttl_seconds: int = 24 * 3600,
+        *,
+        conn: Any = None,
+    ) -> bool:
+        del conn  # Redis stores are not transactional.
         snapshot = snapshot.model_copy()
         snapshot.version = expected_version + 1
         snapshot.updated_at = _now()
@@ -356,7 +370,8 @@ class RedisControlPlane(ControlPlaneStore):
             out.append(row)
         return out
 
-    async def upsert_on_enqueue(self, item: WorkItem, work_id: str) -> dict:
+    async def upsert_on_enqueue(self, item: WorkItem, work_id: str, *, conn: Any = None) -> dict:
+        del conn  # Redis stores are not transactional.
         now = _now()
         key = self.keys.work_meta(work_id)
         raw = await self.redis.get(key)
@@ -399,8 +414,10 @@ class RedisControlPlane(ControlPlaneStore):
         state: str,
         step: Optional[str] = None,
         last_error: Optional[dict] = None,
+        conn: Any = None,
     ) -> dict:
         """Set the primary execution state for a work item."""
+        del conn  # Redis stores are not transactional.
         now = _now()
         key = self.keys.work_meta(work_id)
         raw = await self.redis.get(key)
@@ -452,12 +469,14 @@ class RedisControlPlane(ControlPlaneStore):
         child_work_id: str,
         relation: str = "child",
         max_children: int = 50,
+        conn: Any = None,
     ) -> dict:
         """
         Record a lightweight relationship in the parent meta.
 
         Stored as `child_work_ids` list (most-recent-first) with capped length.
         """
+        del conn  # Redis stores are not transactional.
         now = _now()
         key = self.keys.work_meta(parent_work_id)
         raw = await self.redis.get(key)

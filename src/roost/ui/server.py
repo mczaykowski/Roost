@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import mimetypes
 import os
 import time
@@ -88,6 +89,8 @@ def _build_handler(config: ConsoleConfig) -> type[BaseHTTPRequestHandler]:
                 elif path == "/api/failed":
                     limit = _int_query(query, "limit", 50)
                     self._send_json(asyncio.run(_failed(config, limit=limit)))
+                elif path == "/metrics":
+                    self._send_metrics()
                 elif path.startswith("/api/artifacts/"):
                     artifact_id = path.removeprefix("/api/artifacts/")
                     ext = _str_query(query, "ext") or "json"
@@ -166,6 +169,25 @@ def _build_handler(config: ConsoleConfig) -> type[BaseHTTPRequestHandler]:
             self.end_headers()
             self.wfile.write(content)
 
+        def _send_metrics(self) -> None:
+            from roost.runtime.metrics import content_type, enabled, generate_latest
+
+            if not enabled():
+                body = b"metrics extra not installed; install roost-runtime[metrics]\n"
+                self.send_response(HTTPStatus.NOT_IMPLEMENTED)
+                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
+            body = generate_latest()
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", content_type())
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
     return ConsoleHandler
 
 
@@ -180,16 +202,40 @@ def _production_mode(config: ConsoleConfig) -> bool:
     return config.runtime_mode == "production"
 
 
+async def _record_operator_action(
+    postgres: Any,
+    *,
+    action: str,
+    work_id: str | None,
+    payload: dict[str, Any] | None = None,
+) -> None:
+    """Best-effort audit write; never fails the operator command."""
+    if postgres is None:
+        return
+    try:
+        from roost.runtime.backends.postgres import PostgresOperatorActionStore
+
+        await PostgresOperatorActionStore(postgres).record(
+            action, work_id, "console", payload or {}
+        )
+    except Exception:
+        logging.getLogger("roost").exception(
+            "failed to record operator action %s for work_id=%s", action, work_id
+        )
+
+
 async def _with_postgres(config: ConsoleConfig):
     if not config.postgres_url:
         raise RuntimeError("Postgres URL is required for production mode")
     try:
-        import psycopg
+        from roost.runtime.backends.postgres import connect_postgres_pool
     except Exception as exc:
         raise RuntimeError(
             "Missing Postgres runtime dependency. Install with: uv sync --extra postgres"
         ) from exc
-    return await psycopg.AsyncConnection.connect(config.postgres_url)
+    # Returns a short-lived connection pool. Stores resolve connections per call
+    # from it; the caller closes it in its finally block.
+    return await connect_postgres_pool(config.postgres_url)
 
 
 async def _summary(config: ConsoleConfig) -> dict[str, Any]:
@@ -373,7 +419,13 @@ async def _workers(config: ConsoleConfig, *, limit: int, stale_after_seconds: in
         await postgres.close()
 
 
-async def _retry_work(config: ConsoleConfig, *, work_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+async def _retry_work(
+    config: ConsoleConfig,
+    *,
+    work_id: str,
+    payload: dict[str, Any],
+    operator_action: str = "retry",
+) -> dict[str, Any]:
     from saq import Queue
 
     redis, keys = await _with_redis(config)
@@ -414,6 +466,12 @@ async def _retry_work(config: ConsoleConfig, *, work_id: str, payload: dict[str,
                 "source": "ui",
                 "delay_seconds": delay_seconds,
             }
+        )
+        await _record_operator_action(
+            postgres,
+            action=operator_action,
+            work_id=work_id,
+            payload={"engine": item.engine, "delay_seconds": delay_seconds, "step": step},
         )
         return {"ok": True, "work_id": work_id, "state": "queued"}
     finally:
@@ -464,6 +522,17 @@ async def _cancel_work(config: ConsoleConfig, *, work_id: str, payload: dict[str
                 "resources_cleared": resources_cleared,
             }
         )
+        await _record_operator_action(
+            postgres,
+            action="cancel",
+            work_id=work_id,
+            payload={
+                "engine": item.engine,
+                "reason": reason,
+                "leases_cleared": leases_cleared,
+                "resources_cleared": resources_cleared,
+            },
+        )
         return {"ok": True, "work_id": work_id, "state": "cancelled", "meta": meta}
     finally:
         if postgres:
@@ -500,6 +569,7 @@ async def _replay_dlq(config: ConsoleConfig, *, index: int, payload: dict[str, A
             **payload,
             "step": payload.get("step") or "ui_dlq_replay",
         },
+        operator_action="dlq_replay",
     )
     if payload.get("ack", True):
         ack = await _ack_dlq(config, index=index)
@@ -520,7 +590,15 @@ async def _ack_dlq(config: ConsoleConfig, *, index: int) -> dict[str, Any]:
             control = PostgresControlPlaneStore(postgres)
         else:
             control = RedisControlPlane(redis, keys=keys)
+        entry = await control.get_dlq(index)
         ok = await control.ack_dlq(index)
+        if ok:
+            await _record_operator_action(
+                postgres,
+                action="dlq_ack",
+                work_id=str((entry or {}).get("work_id") or "") or None,
+                payload={"index": index},
+            )
         return {"ok": ok, "acked": ok, "index": index}
     finally:
         if postgres:

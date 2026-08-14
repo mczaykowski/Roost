@@ -1,0 +1,90 @@
+{
+  "schema_version": "1.0",
+  "id": "997ef238-2fd7-4ec1-821b-ec088d4cd22b",
+  "created_at": "2026-08-14T15:14:55.193Z",
+  "agent": "cursor",
+  "mission": "Finish remaining production-mode deploy-gate tasks (P0/P1/P2) at production quality",
+  "summary": "Deploy-gate task set is implemented in the working tree. P0: pooled Postgres, per-step transactions, Redis conn= no-op so simple mode does not crash, Postgres-native orphan recovery. P1: replay claims reconciled to re-run from latest snapshot, link_child persists child_work_ids, operator_actions wired from CLI/console. P2: atomic resource upsert, frozen one-level trigger DSL, JSON step logs plus Prometheus /metrics, stores bound once at construction. uv run ruff check . and pytest: 47 passed against local roost-pg-test.",
+  "decisions": [
+    "Track A for replay: reword docs/labels, keep CLI verb dlq replay and /replay API.",
+    "Wire roost_operator_actions instead of dropping the table.",
+    "Freeze trigger DSL to one-level truthy keys rather than deleting it.",
+    "Resource locks use lease-style atomic upsert, not session advisory locks."
+  ],
+  "assumptions": [
+    "Production DBs must apply migration 0002 before get_meta can SELECT children.",
+    "Operator action recording is production/Postgres only."
+  ],
+  "open_threads": [
+    "Work is uncommitted. Production databases need roost migrate for 0002.",
+    "Lease-lost is checked before the durable write window, not during save."
+  ],
+  "validation": {
+    "status": "passed",
+    "commands": [
+      "uv run ruff check . && ROOST_TEST_POSTGRES_URL=postgresql://roost:roost@localhost:55432/roost uv run pytest -q"
+    ],
+    "notes": "47 passed, ruff clean. Unique resource keys added to test_postgres_concurrency.py after leftover claims made acquire return False."
+  },
+  "changed_paths": [
+    "src/roost/runtime/swarm.py",
+    "src/roost/runtime/backends/postgres/stores.py",
+    "src/roost/runtime/backends/postgres/migrations/0002_work_meta_children.sql",
+    "src/roost/runtime/backends/redis.py",
+    "src/roost/runtime/stores.py",
+    "src/roost/runtime/config.py",
+    "src/roost/runtime/metrics.py",
+    "src/roost/cli.py",
+    "src/roost/ui/server.py",
+    "README.md"
+  ],
+  "git_status": {
+    "is_repo": true,
+    "is_dirty": true,
+    "uncommitted_count": 42,
+    "uncommitted_paths": [
+      ".github/workflows/ci.yml",
+      ".seedrop/view/AGENTS.md",
+      ".seedrop/view/manifest.json",
+      ".seedrop/view/policy.json",
+      "CHANGELOG.md",
+      "README.md",
+      "ROADMAP.md",
+      "docs/release-notes-0.1.0.md",
+      "docs/runtime-storage.md",
+      "docs/troubleshooting.md",
+      "examples/production/README.md",
+      "pyproject.toml",
+      "src/roost/cli.py",
+      "src/roost/runtime/backends/postgres/__init__.py",
+      "src/roost/runtime/backends/postgres/stores.py",
+      "src/roost/runtime/backends/redis.py",
+      "src/roost/runtime/config.py",
+      "src/roost/runtime/models.py",
+      "src/roost/runtime/stores.py",
+      "src/roost/runtime/swarm.py",
+      "src/roost/ui/server.py",
+      "src/roost/ui/static/app.js",
+      "tests/test_cli_config.py",
+      "tests/test_postgres_migrations.py",
+      "tests/test_runtime_primitives.py",
+      "uv.lock",
+      ".seedrop/view/continuity/20260615_121748347Z_deep-dive-maturity-audit-deploy-gate-task-set-for-roost-production-mode.json",
+      ".seedrop/view/knowledge/audit.md",
+      ".seedrop/view/runs/",
+      ".seedrop/view/signals-archive.json",
+      ".seedrop/view/signals/",
+      ".seedrop/view/tasks/",
+      "src/roost/runtime/backends/postgres/migrations/0002_work_meta_children.sql",
+      "src/roost/runtime/metrics.py",
+      "tests/test_metrics.py",
+      "tests/test_operator_actions.py",
+      "tests/test_postgres_concurrency.py",
+      "tests/test_postgres_link_children.py",
+      "tests/test_postgres_recovery.py",
+      "tests/test_postgres_resource_lock.py",
+      "tests/test_postgres_transaction.py",
+      "tests/test_triggers.py"
+    ]
+  }
+}
