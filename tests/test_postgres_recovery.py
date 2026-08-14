@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 import time
 import uuid
+from dataclasses import replace
 from typing import Any
 
 import pytest
@@ -195,3 +196,36 @@ async def test_production_store_types_do_not_swap_after_ensure(migrated, pool):
         assert isinstance(runtime.inflight, RedisInflightStore)
     finally:
         await runtime.close()
+
+
+async def test_recover_orphans_emits_one_work_recovered_event(migrated, pool):
+    runtime = _bind_production_runtime(pool, stale_after_seconds=0.0)
+    work_id = f"rec-ev-{uuid.uuid4().hex[:8]}"
+    await _plant_running_work(runtime, work_id=work_id)
+
+    recovered = await runtime.recover_orphans_once()
+    assert recovered >= 1
+
+    events = await runtime.control.list_events(limit=100)
+    recovered_events = [
+        event
+        for event in events
+        if event.get("kind") == "work_recovered" and event.get("work_id") == work_id
+    ]
+    assert len(recovered_events) == 1
+    event = recovered_events[0]
+    assert event["engine"] == "dummy"
+    assert event["step"] == "s1"
+    assert event["snapshot_version"] == 1
+    assert event["reason"] == "stale_without_lease"
+
+    # The set_state bump must suppress a second event on the next tick.
+    runtime.config = replace(runtime.config, stale_after_seconds=30.0)
+    await runtime.recover_orphans_once()
+    events = await runtime.control.list_events(limit=100)
+    recovered_events = [
+        event
+        for event in events
+        if event.get("kind") == "work_recovered" and event.get("work_id") == work_id
+    ]
+    assert len(recovered_events) == 1

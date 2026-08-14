@@ -32,6 +32,18 @@ scripts/e2e_postgres_migrate.sh
 scripts/e2e_postgres_watchlist.sh
 ```
 
+- If recovery, leases, worker logging, or mid-step crash behavior changed, run
+  the crash + Redis-blip drill (isolated Docker ports; does not use 5432):
+
+```bash
+scripts/ops_drill_crash_and_redis_blip.sh
+```
+
+The drill waits for an **active lease**, SIGKILLs that holder mid-`step()`,
+lets a replacement resume from the latest snapshot, then `FLUSHALL`s Redis and
+recovers with `--stale-after`. It needs Docker and takes about a minute. Not
+required on every PR; required before a release that touches this path.
+
 - If production setup or operator docs changed, run the sandbox doctor flow:
 
 ```bash

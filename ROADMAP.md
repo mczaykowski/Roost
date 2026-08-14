@@ -89,7 +89,9 @@ Ship:
   first-class concepts. Initial production-mode behavior is covered by e2e.
 - Clear retry and dead-letter behavior. Initial CLI and console controls are
   shipped.
-- Structured logs, health checks, and metrics hooks.
+- Structured logs, health checks, and metrics hooks. Metrics scrape +
+  `roost doctor` check shipped; worker process still does not configure
+  logging (see sprint OPS).
 - Honest runtime guarantees in the docs: at-least-once execution, resumable
   snapshots, lease ownership, resource locking, and engine idempotency
   expectations.
@@ -98,6 +100,8 @@ Gate:
 
 - Killing a worker mid-step, restarting infrastructure, and re-running failed
   work from its latest snapshot behaves predictably and is covered by tests.
+  Redis-flush recovery is covered. Mid-step lease-held kill is **not** yet
+  (sprint OPS-6).
 
 ## Phase 2: Plug-And-Play Operator Experience
 

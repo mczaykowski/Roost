@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import random
 import time
 import typing
@@ -43,6 +44,39 @@ logger = logging.getLogger("roost.runtime")
 _RECOVERABLE_STATES = ("running", "queued")
 _TERMINAL_STATES = frozenset({"cancelled", "done", "failed"})
 _RECOVERY_PAGE_SIZE = 200
+# Engine data keys that schedule the next step without being durable progress.
+_DELAY_DATA_KEYS = frozenset({"next_check_after"})
+
+
+def _memory_fingerprint(snapshot: Any) -> str:
+    """Compare snapshots as durable memory, ignoring delay/movement fields."""
+    data = dict(getattr(snapshot, "data", None) or {})
+    for key in _DELAY_DATA_KEYS:
+        data.pop(key, None)
+    artifacts = []
+    for artifact in getattr(snapshot, "artifacts", None) or []:
+        if hasattr(artifact, "model_dump"):
+            artifacts.append(artifact.model_dump(mode="json"))
+        else:
+            artifacts.append(artifact)
+    return json.dumps(
+        {
+            "step": getattr(snapshot, "step", None),
+            "is_finished": bool(getattr(snapshot, "is_finished", False)),
+            "data": data,
+            "artifacts": artifacts,
+            "history": list(getattr(snapshot, "history", None) or []),
+        },
+        sort_keys=True,
+        default=str,
+    )
+
+
+def is_wait_only_step(previous: Any, new: Any) -> bool:
+    """True when a step only asked to wait; delay is movement, not a new version."""
+    if getattr(new, "is_finished", False):
+        return False
+    return _memory_fingerprint(previous) == _memory_fingerprint(new)
 
 
 def _observe(
@@ -81,6 +115,8 @@ class SwarmConfig:
     inflight_ttl_seconds: int = 120
     worker_heartbeat_interval_seconds: float = 10.0
     recovery_interval_seconds: float = 2.0
+    # Don't re-enqueue work whose worker is slow, not dead. Recovery still
+    # requires no live lease. Override via roost.toml / --stale-after.
     stale_after_seconds: float = 30.0
     resource_ttl_seconds: int = 60
     snapshot_ttl_seconds: int = 24 * 3600
@@ -496,6 +532,34 @@ class _RedisSwarmRuntime:
 
             expected_version = snapshot.version
 
+            if is_wait_only_step(snapshot, new_snapshot):
+                # Delay waits are movement: re-enqueue, do not burn a snapshot version.
+                delay = int(max(0, new_snapshot.next_step_delay_seconds))
+                await self.queue.enqueue(
+                    "work_step",
+                    work_id=work_id,
+                    scheduled=self._scheduled_after(delay),
+                    timeout=self._job_timeout(),
+                    retries=self.config.job_retries,
+                    retry_delay=self.config.job_retry_delay_seconds,
+                    retry_backoff=self.config.job_retry_backoff,
+                )
+                await self.control.set_state(
+                    work_id=work_id,
+                    engine=item.engine,
+                    state="running",
+                    step=snapshot.step,
+                )
+                _observe("success", engine=item.engine)
+                status = "success"
+                log_version = expected_version
+                return {
+                    "status": "success",
+                    "step": snapshot.step,
+                    "finished": False,
+                    "info": "wait_only",
+                }
+
             # --- Durable write window: one transaction ---------------------
             # All of snapshot.save / set_state / events / artifacts / link_child
             # land atomically so meta and snapshot can never disagree after a
@@ -682,6 +746,10 @@ class _RedisSwarmRuntime:
                             "runtime_mode": self.config.runtime_mode,
                             "redis_prefix": self.config.redis_prefix,
                             "concurrency": concurrency,
+                            "pid": os.getpid(),
+                            "heartbeat_interval_seconds": (
+                                self.config.worker_heartbeat_interval_seconds
+                            ),
                         },
                     )
                 await asyncio.sleep(max(1.0, self.config.worker_heartbeat_interval_seconds))
@@ -769,7 +837,22 @@ class _RedisSwarmRuntime:
         engine_id = str((meta or {}).get("engine") or snap.engine or "unknown")
         state = str((meta or {}).get("state") or "queued")
         step = str((meta or {}).get("step") or snap.step)
-        await self.control.set_state(work_id=work_id, engine=engine_id, state=state, step=step)
+        event = {
+            "kind": "work_recovered",
+            "work_id": work_id,
+            "engine": engine_id,
+            "step": step,
+            "snapshot_version": snap.version,
+            "reason": "stale_without_lease",
+        }
+        async with self._step_transaction() as tx:
+            await self.control.set_state(
+                work_id=work_id, engine=engine_id, state=state, step=step, conn=tx
+            )
+            if tx is None:
+                await self.control.push_event(event)
+            else:
+                await self.control.push_event(event, conn=tx)
         await self.inflight.mark(
             work_id,
             payload={

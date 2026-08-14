@@ -1,7 +1,7 @@
 # P0-1 · Postgres connection pool per store
 
 **Severity:** P0 (production hot-path crash)
-**Status:** open
+**Status:** landed (PR #13)
 **Blocked by:** —
 **Blocks:** P0-2 (cleaner once pooling lands)
 **Audit ref:** `.seedrop/view/knowledge/audit.md` §P0-1

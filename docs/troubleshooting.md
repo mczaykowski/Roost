@@ -157,7 +157,48 @@ causes:
 - The worker is running in simple mode instead of production mode.
 - The worker can reach Redis but cannot write to Postgres.
 
+`roost workers` JSON includes `age_seconds` as well as `stale`. A SIGKILL'd
+worker cannot write a goodbye heartbeat; it looks live until `--stale-after`
+elapses. That is expected. Recommend `--stale-after` of at least twice the
+heartbeat interval (default interval is 10s, so 20s or more). The console
+Workers view shows age, not only the boolean.
+
 Run `doctor` with the same config the worker uses.
+
+## Worker Logs Are Empty
+
+`roost worker` writes JSON step lines to stderr at INFO. There is no separate
+log file. Tail the process:
+
+```bash
+uv run roost worker --engines watchlist --log-level info 2> worker.log
+tail -f worker.log
+```
+
+Each completed step is one JSON object with `work_id`, `engine`, `step`,
+`attempt`, `status`, `version`, and `duration_ms`. Use `--log-level debug` for
+noisier library logs; `warning` or `error` will hide the step lines.
+
+If you redirect only stdout, the JSON lines will still appear on the terminal
+(stderr). The worker does not use OpenTelemetry.
+
+## Redis Flushed And Work Sits For ~30s
+
+After Redis `FLUSHALL`, queue and in-flight keys are gone. Postgres still has
+the snapshot. Orphan recovery will not re-enqueue work whose snapshot or meta
+is newer than `stale_after_seconds` (default **30**) while it also requires no
+live lease.
+
+That 30s window exists so a slow worker is not treated as dead. It is expected
+unless you lower it:
+
+```bash
+uv run roost worker --stale-after 2 --recovery-interval 1 --lease-ttl 4
+```
+
+Do not default production `stale_after_seconds` to 2. Use the knob for drills
+and incidents. `roost events` should include `kind=work_recovered` once the
+replacement worker re-enqueues the work.
 
 ## Artifacts Are Missing
 

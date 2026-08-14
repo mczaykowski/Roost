@@ -1,7 +1,7 @@
 # P0-3 · Postgres-native recovery scan
 
 **Severity:** P0 (violates a stated working agreement; silent data loss on Redis flush)
-**Status:** open
+**Status:** landed (PR #13)
 **Blocked by:** —
 **Blocks:** —
 **Audit ref:** `.seedrop/view/knowledge/audit.md` §P0-3

@@ -270,7 +270,9 @@ uv run roost enqueue --engine my-engine --payload '{"task":"ship it"}'
 - `RedisSwarm`: Redis + SAQ backed scheduler, lease manager, retry loop, and recovery path.
 - Production mode: Redis queueing plus Postgres-backed durable state.
 - Worker heartbeats: inspect active and stale workers with `roost workers` or
-  the console Workers view.
+  the console Workers view. JSON includes `age_seconds`. SIGKILL cannot write a
+  goodbye; a worker looks live until `--stale-after` elapses (use
+  `>= 2 * heartbeat interval`, default interval 10s).
 
 Runtime guarantees:
 
@@ -278,8 +280,8 @@ Runtime guarantees:
 - optimistic snapshot persistence
 - per-work leases with renewal
 - optional resource locks
-- delayed continuation via `next_step_delay_seconds`
-- orphan recovery when a worker dies mid-step
+- delayed continuation via `next_step_delay_seconds` (re-enqueued without a new snapshot version when the step only waited)
+- orphan recovery when a worker dies mid-step (`work_recovered` event; `--stale-after` / `--recovery-interval` on `roost worker`)
 - status metadata and event stream
 - bounded retries and dead-letter queue
 
@@ -295,6 +297,7 @@ uv run roost doctor
 uv run roost engines
 uv run roost enqueue --engine watchlist --payload '{"url":"https://example.com"}'
 uv run roost worker --engines watchlist --concurrency 4
+uv run roost worker --engines watchlist --log-level info --stale-after 30
 uv run roost status <work_id>
 uv run roost inspect <work_id>
 uv run roost list

@@ -1,7 +1,7 @@
 # P1-3 · Wire or drop `roost_operator_actions`
 
 **Severity:** P1 (doc implies a shipped feature; table is empty)
-**Status:** open
+**Status:** landed (PR #13)
 **Blocked by:** —
 **Blocks:** —
 **Audit ref:** `.seedrop/view/knowledge/audit.md` §P1-3

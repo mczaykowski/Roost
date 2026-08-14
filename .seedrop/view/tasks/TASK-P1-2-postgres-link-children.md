@@ -1,7 +1,7 @@
 # P1-2 · Persist link_child in Postgres (close the mode asymmetry)
 
 **Severity:** P1 (silent functional regression between modes)
-**Status:** open
+**Status:** landed (PR #13)
 **Blocked by:** —
 **Blocks:** —
 **Audit ref:** `.seedrop/view/knowledge/audit.md` §P1-2

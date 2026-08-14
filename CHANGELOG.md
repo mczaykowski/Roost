@@ -31,6 +31,13 @@ Postgres for durable operational memory.
 - `roost_work_meta.children` (migration 0002) so `link_child` matches simple mode.
 - Operator action records from CLI/console cancel, retry, and DLQ commands; `roost actions`.
 - Optional Prometheus counters scraped at `GET /metrics` on the console (`[metrics]` extra).
+- Worker JSON step logs on stderr (`roost worker --log-level`); `--stale-after`,
+  `--recovery-interval`, and `--heartbeat-interval` on the worker (also
+  `[worker]` in `roost.toml`).
+- `work_recovered` events when orphan recovery re-enqueues work.
+- Wait-only steps re-enqueue without burning a snapshot version.
+- `roost workers` JSON `age_seconds`; console Workers view shows age.
+- Mid-step crash + Redis-blip drill (`scripts/ops_drill_crash_and_redis_blip.sh`).
 
 ### Changed
 

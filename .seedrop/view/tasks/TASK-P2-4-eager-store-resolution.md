@@ -1,7 +1,7 @@
 # P2-4 · Resolve store mode once at construction
 
 **Severity:** P2 (hot-path indirection that hurts correctness reasoning)
-**Status:** open
+**Status:** landed (PR #13)
 **Blocked by:** P0-1 (natural moment to revisit store wiring)
 **Blocks:** —
 **Audit ref:** `.seedrop/view/knowledge/audit.md` §P2-4

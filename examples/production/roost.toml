@@ -16,6 +16,10 @@ concurrency = 2
 timeout_seconds = 120
 retries = 5
 lease_ttl_seconds = 60
+# 30s so a slow worker is not treated as dead. Lower with --stale-after for drills.
+stale_after_seconds = 30
+recovery_interval_seconds = 2
+heartbeat_interval_seconds = 10
 workspace_root = ".roost/workspaces"
 workspace_mode = "worktree"
 

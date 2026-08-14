@@ -120,6 +120,9 @@ class WorkerRuntimeConfig(BaseModel):
     timeout_seconds: int = 120
     retries: int = 5
     lease_ttl_seconds: int = 60
+    stale_after_seconds: float = 30.0
+    recovery_interval_seconds: float = 2.0
+    heartbeat_interval_seconds: float = 10.0
     workspace_root: Optional[str] = None
     workspace_mode: Literal["worktree", "clone"] = DEFAULT_WORKSPACE_MODE
 

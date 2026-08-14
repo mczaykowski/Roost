@@ -63,6 +63,8 @@ class WatchlistEngine:
         now = time.time()
         next_check_after = float(data.get("next_check_after") or 0.0)
         if next_check_after and now < next_check_after:
+            # Wait is movement (next_step_delay_seconds). next_check_after stays
+            # on the last saved observation so recovery does not check early.
             new_snapshot = snapshot.model_copy()
             new_snapshot.step = "check"
             new_snapshot.is_finished = False

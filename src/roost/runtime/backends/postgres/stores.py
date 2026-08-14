@@ -883,6 +883,21 @@ class PostgresOperatorActionStore:
         }
 
 
+def annotate_worker_liveness(
+    worker: dict[str, Any],
+    *,
+    now: float,
+    stale_after_seconds: Optional[float] = None,
+) -> dict[str, Any]:
+    """Add age_seconds (and stale, when a window is given) to a heartbeat row."""
+    last_seen = float(worker.get("last_seen_at") or 0.0)
+    row = dict(worker)
+    row["age_seconds"] = round(max(0.0, now - last_seen), 3)
+    if stale_after_seconds is not None:
+        row["stale"] = last_seen < (now - float(stale_after_seconds))
+    return row
+
+
 class PostgresWorkerHeartbeatStore:
     def __init__(self, pool: Any):
         self._pool = pool
@@ -933,10 +948,13 @@ class PostgresWorkerHeartbeatStore:
                 )
             ).fetchall()
         workers = [self._row(row) for row in rows]
-        if stale_after_seconds is None:
-            return workers
-        cutoff = datetime.now(UTC).timestamp() - stale_after_seconds
-        return [dict(worker, stale=float(worker["last_seen_at"]) < cutoff) for worker in workers]
+        now = datetime.now(UTC).timestamp()
+        return [
+            annotate_worker_liveness(
+                worker, now=now, stale_after_seconds=stale_after_seconds
+            )
+            for worker in workers
+        ]
 
     def _row(self, row: Any) -> dict[str, Any]:
         return {

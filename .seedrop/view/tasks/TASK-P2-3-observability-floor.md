@@ -1,7 +1,7 @@
 # P2-3 · Observability floor (structured logs + metrics)
 
 **Severity:** P2 (thin for a "production runtime")
-**Status:** open
+**Status:** partial (Prometheus + `/metrics` shipped in PR #13; worker stdout still silent — see OPS-1)
 **Blocked by:** —
 **Blocks:** —
 **Audit ref:** `.seedrop/view/knowledge/audit.md` §P2-3
