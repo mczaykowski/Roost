@@ -26,6 +26,8 @@ uv run roost doctor --config examples/production/roost.toml
 ```
 
 `doctor` should fail before migrations and pass after migrations are applied.
+Use it whenever setup feels suspicious; it checks Redis, Postgres, migrations,
+engines, artifacts, workspace paths, and queue settings.
 
 ## Run A Worker
 
@@ -59,7 +61,22 @@ uv run roost enqueue \
 uv run roost list --config examples/production/roost.toml
 uv run roost events --config examples/production/roost.toml
 uv run roost workers --config examples/production/roost.toml
+uv run roost dlq list --config examples/production/roost.toml
 ```
+
+What to look for:
+
+- `list` shows durable work metadata from Postgres.
+- `events` shows the runtime history.
+- `workers` shows active or stale worker heartbeats.
+- `dlq list` shows failed work that needs re-run from the latest snapshot or acknowledgement.
+
+## Troubleshooting
+
+- If `doctor` says migrations are missing, run `uv run roost migrate --config examples/production/roost.toml`.
+- If `workers` is empty, start `uv run roost worker --config examples/production/roost.toml` and wait a few seconds.
+- If the console cannot load work, confirm both Redis and Postgres are running with `docker compose -f examples/production/docker-compose.yml ps`.
+- If you changed ports, update `examples/production/roost.toml` to match.
 
 ## Stop Services
 

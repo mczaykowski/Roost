@@ -2,9 +2,10 @@
 
 ![Roost Console running on a laptop](assets/roost_main.png)
 
-Roost is a tiny Redis-backed runtime for long-running agent workers: persist a
-snapshot after every step, lease work to one worker at a time, and resume safely
-after crashes.
+Roost is a tiny runtime for long-running agent workers: persist a snapshot
+after every step, lease work to one worker at a time, and resume safely after
+crashes. Simple mode uses Redis only. Production mode uses Redis for movement
+and Postgres for durable operational memory.
 
 Agent demos are easy. Long-running agent workers are not.
 
@@ -16,7 +17,7 @@ The moment an agent leaves a notebook or chat session, the hard problems change:
 - Can another worker resume after a crash?
 - Which resources are locked?
 - What did the agent produce?
-- Can operators inspect, retry, replay, or dead-letter the work?
+- Can operators inspect, retry, re-run from the last step, or dead-letter the work?
 
 Roost exists for that layer.
 
@@ -148,9 +149,9 @@ uv run roost ui
 ```
 
 Open `http://127.0.0.1:8766` to see live work, recent events, failed work, and
-JSON artifacts. The console can also retry, cancel, replay, and acknowledge
-work, using the same Redis prefix, namespace, and artifact root settings as the
-CLI. It is local-only by default.
+JSON artifacts. The console can also retry, cancel, re-run from the last step,
+and acknowledge work, using the same Redis prefix, namespace, and artifact root
+settings as the CLI. It is local-only by default.
 
 ![Roost Console work view](assets/01.png)
 
@@ -158,6 +159,49 @@ The console keeps the runtime layer visible: live work, saved snapshots, event
 history, failures, and output artifacts.
 
 ![Roost Console work detail](assets/02.png)
+
+## Production Mode
+
+Production mode keeps Roost small while making runtime state durable and
+queryable:
+
+- Redis moves work through the queue and keeps short-lived in-flight markers.
+- Postgres remembers work items, snapshots, leases, resource claims, events,
+  DLQ entries, artifact metadata, and worker heartbeats.
+- Workers still run in your infrastructure.
+- The console reads the durable state, so operators can inspect work, failures,
+  events, outputs, and worker health.
+
+Run a local production-shaped sandbox:
+
+```bash
+docker compose -f examples/production/docker-compose.yml up -d
+uv sync --extra redis --extra postgres --extra dev
+uv run roost migrate --config examples/production/roost.toml
+uv run roost doctor --config examples/production/roost.toml
+```
+
+Then start a worker and console:
+
+```bash
+uv run roost worker --config examples/production/roost.toml
+uv run roost ui --config examples/production/roost.toml
+```
+
+Useful production inspection commands:
+
+```bash
+uv run roost list --config examples/production/roost.toml
+uv run roost events --config examples/production/roost.toml
+uv run roost workers --config examples/production/roost.toml
+uv run roost dlq list --config examples/production/roost.toml
+```
+
+`roost doctor` is the setup confidence check. In production mode it verifies
+Redis, Postgres connectivity, packaged migrations, engines, artifacts, and
+workspace paths. Optional Prometheus metrics (`uv sync --extra metrics`) are
+scraped at `GET /metrics` on the console; `roost doctor` reports whether the
+extra is installed.
 
 ## Engine Contract
 
@@ -219,11 +263,16 @@ uv run roost enqueue --engine my-engine --payload '{"task":"ship it"}'
 ## What Roost Provides
 
 - `WorkItem`: durable unit of work.
-- `Snapshot`: replayable engine state after each step.
+- `Snapshot`: durable engine state after each step (re-runnable from the last step).
 - `Lease`: time-bound worker ownership.
 - `Artifact`: content-addressed output produced by an engine.
 - `Engine`: small async contract for pluggable execution.
 - `RedisSwarm`: Redis + SAQ backed scheduler, lease manager, retry loop, and recovery path.
+- Production mode: Redis queueing plus Postgres-backed durable state.
+- Worker heartbeats: inspect active and stale workers with `roost workers` or
+  the console Workers view. JSON includes `age_seconds`. SIGKILL cannot write a
+  goodbye; a worker looks live until `--stale-after` elapses (use
+  `>= 2 * heartbeat interval`, default interval 10s).
 
 Runtime guarantees:
 
@@ -231,8 +280,8 @@ Runtime guarantees:
 - optimistic snapshot persistence
 - per-work leases with renewal
 - optional resource locks
-- delayed continuation via `next_step_delay_seconds`
-- orphan recovery when a worker dies mid-step
+- delayed continuation via `next_step_delay_seconds` (re-enqueued without a new snapshot version when the step only waited)
+- orphan recovery when a worker dies mid-step (`work_recovered` event; `--stale-after` / `--recovery-interval` on `roost worker`)
 - status metadata and event stream
 - bounded retries and dead-letter queue
 
@@ -248,10 +297,13 @@ uv run roost doctor
 uv run roost engines
 uv run roost enqueue --engine watchlist --payload '{"url":"https://example.com"}'
 uv run roost worker --engines watchlist --concurrency 4
+uv run roost worker --engines watchlist --log-level info --stale-after 30
 uv run roost status <work_id>
 uv run roost inspect <work_id>
 uv run roost list
 uv run roost events
+uv run roost workers
+uv run roost actions
 uv run roost retry <work_id>
 uv run roost cancel <work_id>
 uv run roost dlq list
@@ -261,6 +313,10 @@ uv run roost ui
 uv run roost migrate --plan
 uv run roost workspace-path <work_id>
 ```
+
+`roost dlq replay` re-enqueues dead-lettered work from its latest snapshot; it
+is not a historical step-by-step replay. Full snapshot history is on the
+[ROADMAP](ROADMAP.md).
 
 Useful environment variables:
 
@@ -274,10 +330,10 @@ Useful environment variables:
 `roost.toml` uses the same settings in file form. CLI flags override
 environment variables, and environment variables override `roost.toml`.
 
-Postgres durable storage is being introduced behind explicit production-mode
-commands for work items, snapshots, leases, resource claims, events, DLQ, and
-operator metadata, plus artifact metadata and worker heartbeats. To inspect
-packaged migrations:
+Postgres durable storage is available behind explicit production-mode commands
+for work items, snapshots, leases, resource claims, events, DLQ, operator
+action records, artifact metadata, and worker heartbeats. To inspect packaged
+migrations:
 
 ```bash
 uv run roost migrate --plan
@@ -296,7 +352,7 @@ durable runtime state:
 scripts/e2e_postgres_watchlist.sh
 ```
 
-For a production-shaped local setup with Docker Compose, see
+For the full production-shaped local setup with Docker Compose, see
 `examples/production/`.
 
 ## How It Differs
@@ -341,7 +397,8 @@ The storage architecture rationale is in
 
 ## Limitations
 
-- The current backend is Redis + SAQ.
+- Simple mode is Redis + SAQ. Production mode adds Postgres as the durable
+  system of record.
 - Execution is at-least-once, so engines must make `step()` retry-safe from the
   same snapshot.
 - Roost stores the latest snapshot for each work item; engines should put large

@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "id": "b3e84581-e6e1-4725-bf36-43319f843963",
+  "created_at": "2026-06-15T12:17:48.347Z",
+  "agent": "zcode",
+  "mission": "Deep-dive maturity audit + deploy-gate task set for Roost production mode",
+  "summary": "Line-verified audit (.seedrop/view/knowledge/audit.md) of Roost production-mode correctness: 3 P0 bugs (shared Postgres session = concurrency crash at swarm.py:128; no transaction boundary around a step — each store commits independently; recovery discovery Redis-only at swarm.py:492 violates policy agreement #5), 3 P1 doc/code mismatches (replay oversold vs latest-only snapshots; link_child regression between modes; roost_operator_actions dead schema), 4 P2 smells (pg_advisory_xact_lock no-op since it commits immediately; trigger baby-DSL; thin observability; lazy store swap). Authored 9 tasks in .seedrop/view/tasks/ keyed to findings with file:line anchors + done-when checklists; TASK-DEPLOY-GATE.md is the index. Wired audit + tasks into policy.json path_purposes. Note: seed view sync still bloats manifest (1437 files, ignores .gitignore) — pre-existing tooling gap.",
+  "decisions": [],
+  "assumptions": [],
+  "open_threads": [],
+  "validation": {
+    "status": "unknown",
+    "commands": []
+  },
+  "changed_paths": [],
+  "git_status": {
+    "is_repo": true,
+    "is_dirty": true,
+    "uncommitted_count": 4,
+    "uncommitted_paths": [
+      ".seedrop/view/manifest.json",
+      ".seedrop/view/policy.json",
+      ".seedrop/view/knowledge/audit.md",
+      ".seedrop/view/tasks/"
+    ]
+  }
+}

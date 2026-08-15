@@ -1,0 +1,11 @@
+{
+  "schema_version": "1.0",
+  "task_id": "7f28025c-9b57-4db9-babe-16e7573d4376",
+  "title": "Lease-lost is checked before the durable write window, not during save.",
+  "description": "Open thread from packet 997ef238-2fd7-4ec1-821b-ec088d4cd22b: Lease-lost is checked before the durable write window, not during save.",
+  "dedup_key": "thread:5016845a7029",
+  "status": "open",
+  "created_at": "2026-08-14T15:14:55.234Z",
+  "updated_at": "2026-08-14T15:14:55.234Z",
+  "related_runs": []
+}

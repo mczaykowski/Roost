@@ -22,6 +22,17 @@ function prettyTime(epochSeconds) {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
+function formatAge(ageSeconds) {
+  if (ageSeconds == null || Number.isNaN(Number(ageSeconds))) return "-";
+  const seconds = Math.max(0, Math.round(Number(ageSeconds)));
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
 function futureTime(epochSeconds) {
   if (!epochSeconds) return "-";
   const seconds = Math.ceil(Number(epochSeconds) - Date.now() / 1000);
@@ -200,7 +211,7 @@ function renderWorkers(runtimeMode) {
   if (runtimeMode !== "production") {
     $("#workerRows").innerHTML = `
       <tr class="empty-row">
-        <td colspan="6">
+        <td colspan="7">
           <div class="empty">Worker heartbeats are available in production mode.</div>
         </td>
       </tr>
@@ -211,7 +222,7 @@ function renderWorkers(runtimeMode) {
   if (!rows.length) {
     $("#workerRows").innerHTML = `
       <tr class="empty-row">
-        <td colspan="6">
+        <td colspan="7">
           <div class="empty">No workers found.</div>
         </td>
       </tr>
@@ -231,6 +242,7 @@ function renderWorkers(runtimeMode) {
           </td>
           <td>${engines}</td>
           <td>${row.queue_name || "-"}</td>
+          <td>${formatAge(row.age_seconds)}</td>
           <td>${prettyTime(row.last_seen_at)}</td>
           <td>${metadata.runtime_mode || "production"}</td>
         </tr>
@@ -248,10 +260,11 @@ function workerPill(row) {
 function eventText(row) {
   if (row.kind === "work_state_changed") return `${stateLabel(row.prev_state)} to ${stateLabel(row.state)}`;
   if (row.kind === "work_enqueued") return "Work added";
+  if (row.kind === "work_recovered") return "Recovered (stale, no lease)";
   if (row.kind === "dlq_pushed") return "Moved to failed work";
   if (row.kind === "work_retry_requested") return "Retry requested";
   if (row.kind === "work_cancelled") return "Cancelled";
-  if (row.kind === "dlq_replay_requested") return "DLQ replay requested";
+  if (row.kind === "dlq_replay_requested") return "DLQ re-run requested";
   return row.kind || "Runtime event";
 }
 
@@ -277,7 +290,7 @@ function renderFailed(rows, dlq) {
         row.source === "dlq"
           ? `
             <div class="row-actions">
-              <button class="action-button" data-dlq-replay="${row.index}">Replay</button>
+              <button class="action-button" data-dlq-replay="${row.index}">Re-run</button>
               <button class="action-button action-muted" data-dlq-ack="${row.index}">Ack</button>
             </div>
           `

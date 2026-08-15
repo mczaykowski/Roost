@@ -58,7 +58,9 @@ Redis-only is not a mistake. It is the reason Roost feels small.
 
 ## Production Mode
 
-Production mode adds Postgres and object storage.
+Production mode adds Postgres as the durable system of record. Object storage is
+the intended next evidence layer for larger artifacts; the current artifact
+store remains local filesystem metadata plus content-addressed files.
 
 It should be used when teams run many agents across projects, verticals, or
 customers and need durable operational history.
@@ -66,7 +68,7 @@ customers and need durable operational history.
 Production mode optimizes for:
 
 - queryable work history
-- audit trail
+- event history
 - retention policy
 - incident debugging
 - worker fleet visibility
@@ -79,7 +81,7 @@ Production mode optimizes for:
 Redis owns fast movement and coordination:
 
 - queues
-- delayed jobs
+- delayed jobs (`next_step_delay_seconds` is movement, not a new snapshot version)
 - leases
 - in-flight markers
 - resource locks
@@ -111,7 +113,7 @@ Postgres owns durable operational memory:
 - work item records
 - latest work metadata
 - snapshots
-- snapshot history, where configured
+- snapshot history (later; optional)
 - event history
 - dead-letter records
 - worker heartbeats
@@ -119,9 +121,9 @@ Postgres owns durable operational memory:
 - verticals
 - environments
 - worker groups
-- operator actions
+- operator actions (later)
 - retention policy state
-- audit log
+- audit log (later)
 
 Postgres is the right tool for data that is:
 
@@ -180,17 +182,17 @@ trust the evidence:
 | Data | Simple mode | Production mode | Notes |
 | --- | --- | --- | --- |
 | Queue jobs | Redis | Redis | Runtime movement. |
-| Leases | Redis | Redis | TTL-based ownership. |
+| Leases | Redis | Postgres | Durable ownership record in production. |
 | In-flight markers | Redis | Redis | Short-lived recovery hints. |
-| Resource locks | Redis | Redis | Fast coordination. |
+| Resource locks | Redis | Postgres | Durable resource claims in production. |
 | Work items | Redis | Postgres | Durable identity in production. |
 | Latest snapshot | Redis | Postgres | Resumable progress. |
 | Snapshot history | Not required | Postgres, optional | Useful for audit/debugging. |
 | Work metadata | Redis | Postgres | Status, step, timestamps. |
 | Events | Redis stream | Postgres | Queryable production history. |
 | DLQ | Redis list | Postgres | Failed work should survive Redis loss. |
-| Worker heartbeats | Redis | Postgres + Redis | Current liveness plus history. |
-| Operator actions | Redis event | Postgres audit log | Required for team trust. |
+| Worker heartbeats | Not required | Postgres | Current liveness plus history. |
+| Operator actions | Redis event | Postgres events now, audit log later | Required for team trust. |
 | Artifact bytes | Local filesystem | Object storage | Keep large data out of DB. |
 | Artifact metadata | Snapshot/local meta | Postgres | Searchable evidence index. |
 
@@ -204,7 +206,7 @@ Roost should keep these guarantees consistent across storage modes:
 - best-effort resource isolation
 - bounded retries
 - dead-letter visibility
-- operator retry/cancel/replay controls
+- operator retry/cancel/re-run controls
 - inspectable work state
 
 Postgres does not change the engine contract. Engines should still implement:
@@ -214,17 +216,28 @@ async def init_snapshot(item) -> Snapshot: ...
 async def step(snapshot, item) -> Snapshot: ...
 ```
 
-## Implementation Direction
+## Implementation Status
 
-The right next implementation path is incremental:
+The first production foundation is implemented:
 
-1. Define internal store interfaces around existing runtime concepts.
-2. Move current Redis stores behind those interfaces without changing behavior.
-3. Add Postgres migrations and schema for durable state.
-4. Add `roost migrate`.
-5. Add production mode config.
-6. Keep Redis as the queue and coordination layer.
-7. Write recovery tests that prove Redis loss does not erase production history.
+1. Internal store interfaces exist around core runtime concepts.
+2. Redis stores sit behind those interfaces for simple mode.
+3. Postgres migrations and schema exist for durable production state.
+4. `roost migrate` applies packaged migrations.
+5. Production mode config is available through `roost.toml`, CLI flags, and
+   environment variables.
+6. Redis remains the queue and in-flight movement layer.
+7. The production watchlist e2e proves crash/resume through Postgres-backed
+   durable state.
+
+The next storage work should focus on:
+
+- snapshot history beyond the latest accepted snapshot
+- retention controls for events, snapshots, artifacts, and completed work
+- backup and restore guidance for Postgres deployments
+- object storage adapters for large artifact bytes
+- audit-friendly operator action records
+- project/environment separation in durable tables
 
 Avoid:
 
@@ -236,7 +249,7 @@ Avoid:
 
 ## Configuration Shape
 
-The eventual config should read plainly:
+The current config shape reads plainly:
 
 ```toml
 [runtime]
@@ -251,18 +264,12 @@ prefix = "roost"
 url = "postgresql://localhost/roost"
 
 [artifacts]
-backend = "local" # local | s3
 root = ".roost/artifacts"
 ```
 
 Production mode should fail loudly if Postgres is missing or migrations are not
-applied.
-
-The first implementation step is intentionally narrow: package Postgres
-migrations, expose `roost migrate`, and implement durable work item, snapshot,
-artifact metadata, lease, resource claim, worker heartbeat, and control-plane
-stores while keeping Redis as the default runtime. The local migration smoke test is
-`scripts/e2e_postgres_migrate.sh`.
+applied. `roost doctor` checks this, and
+`scripts/e2e_postgres_watchlist.sh` covers the production-mode crash/resume path.
 
 ## Decision
 

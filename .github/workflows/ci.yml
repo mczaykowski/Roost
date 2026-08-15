@@ -9,6 +9,25 @@ jobs:
   test:
     runs-on: ubuntu-latest
 
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: roost
+          POSTGRES_USER: roost
+          POSTGRES_PASSWORD: roost
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U roost -d roost"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # Lets the gated tests in tests/test_postgres_*.py run a live Postgres.
+      ROOST_TEST_POSTGRES_URL: postgresql://roost:roost@localhost:5432/roost
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -30,7 +49,13 @@ jobs:
         run: uv run --extra dev ruff check .
 
       - name: Test
-        run: uv run --extra dev --extra redis pytest -q
+        run: uv run --extra dev --extra redis --extra postgres pytest -q
+
+      - name: Apply Postgres schema (for gated tests)
+        run: uv run --extra postgres roost migrate --postgres-url "$ROOST_TEST_POSTGRES_URL"
+
+      - name: Postgres-backed tests (P0-1 pool, P0-2 transaction, P0-3 recovery)
+        run: uv run --extra dev --extra postgres pytest tests/test_postgres_concurrency.py tests/test_postgres_transaction.py tests/test_postgres_recovery.py tests/test_postgres_resource_lock.py tests/test_postgres_link_children.py tests/test_operator_actions.py -v
 
       - name: Watchlist e2e
         run: scripts/e2e_watchlist.sh

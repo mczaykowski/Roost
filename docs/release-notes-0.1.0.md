@@ -12,7 +12,7 @@ continuation, events, artifacts, and recovery.
 - Run long-lived agent work with durable snapshots after each step.
 - Resume work after a worker crash or restart.
 - Inspect live work, saved snapshots, events, failed work, and artifacts in the local console.
-- Retry, cancel, replay, and acknowledge failed work from the CLI or console.
+- Retry, cancel, re-run from the last step, and acknowledge failed work from the CLI or console.
 - Use the watchlist demo to see the runtime behavior without an LLM key.
 
 ## Quickstart

@@ -47,6 +47,9 @@ concurrency = 2
 timeout_seconds = 30
 retries = 3
 lease_ttl_seconds = 15
+stale_after_seconds = 12
+recovery_interval_seconds = 1
+heartbeat_interval_seconds = 8
 workspace_root = ".roost/workspaces"
 workspace_mode = "clone"
 
@@ -69,6 +72,9 @@ root = ".roost/artifacts"
     assert args.timeout == 30
     assert args.retries == 3
     assert args.lease_ttl == 15
+    assert args.stale_after == 12
+    assert args.recovery_interval == 1
+    assert args.heartbeat_interval == 8
     assert args.workspace_mode == "clone"
     assert args.workspace_root == str(tmp_path / ".roost" / "workspaces")
     assert args.artifact_root == str(tmp_path / ".roost" / "artifacts")
@@ -174,6 +180,9 @@ def test_operator_recovery_commands_are_registered():
     workers_args = parser.parse_args(
         ["workers", "--runtime-mode", "production", "--postgres-url", "postgresql://localhost/roost"]
     )
+    actions_args = parser.parse_args(
+        ["actions", "--runtime-mode", "production", "--postgres-url", "postgresql://localhost/roost", "--work-id", "work-1"]
+    )
 
     assert inspect_args.cmd == "inspect"
     assert retry_args.cmd == "retry"
@@ -189,6 +198,8 @@ def test_operator_recovery_commands_are_registered():
     assert events_args.postgres_url == "postgresql://localhost/roost"
     assert workers_args.cmd == "workers"
     assert workers_args.stale_after == 30
+    assert actions_args.cmd == "actions"
+    assert actions_args.work_id == "work-1"
 
 
 def test_migrate_plan_prints_packaged_migrations(capsys):

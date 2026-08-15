@@ -17,7 +17,7 @@ from roost.runtime.stores import ControlPlaneStore, LeaseStore, ResourceStore, S
 def test_postgres_initial_migration_is_packaged():
     migrations = list_migrations()
 
-    assert [migration.version for migration in migrations] == ["0001"]
+    assert [migration.version for migration in migrations] == ["0001", "0002"]
     sql = migrations[0].sql
     assert "CREATE TABLE IF NOT EXISTS roost_work_items" in sql
     assert "CREATE TABLE IF NOT EXISTS roost_snapshots" in sql
@@ -26,6 +26,8 @@ def test_postgres_initial_migration_is_packaged():
     assert "CREATE TABLE IF NOT EXISTS roost_resource_claims" in sql
     assert "CREATE TABLE IF NOT EXISTS roost_events" in sql
     assert "CREATE TABLE IF NOT EXISTS roost_dlq" in sql
+    assert migrations[1].version == "0002"
+    assert "ADD COLUMN IF NOT EXISTS children JSONB" in migrations[1].sql
 
 
 def test_postgres_stores_satisfy_runtime_store_protocols():

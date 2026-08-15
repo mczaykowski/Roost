@@ -12,14 +12,23 @@ class WorkItemStore(Protocol):
 
     async def get(self, work_id: str) -> Optional[WorkItem]: ...
 
-    async def get_or_claim_work_id(self, item: WorkItem, ttl_seconds: int = 7 * 24 * 3600) -> str: ...
+    async def get_or_claim_work_id(
+        self, item: WorkItem, ttl_seconds: int = 7 * 24 * 3600, *, conn: Any = None
+    ) -> str: ...
 
 
 @runtime_checkable
 class SnapshotStore(Protocol):
-    async def load(self, work_id: str) -> Optional[Snapshot]: ...
+    async def load(self, work_id: str, *, conn: Any = None) -> Optional[Snapshot]: ...
 
-    async def save(self, snapshot: Snapshot, expected_version: int, ttl_seconds: int = 24 * 3600) -> bool: ...
+    async def save(
+        self,
+        snapshot: Snapshot,
+        expected_version: int,
+        ttl_seconds: int = 24 * 3600,
+        *,
+        conn: Any = None,
+    ) -> bool: ...
 
 
 @runtime_checkable
@@ -59,7 +68,9 @@ class ControlPlaneStore(Protocol):
 
     async def list_events(self, *, limit: int = 50) -> list[dict[str, Any]]: ...
 
-    async def upsert_on_enqueue(self, item: WorkItem, work_id: str) -> dict[str, Any]: ...
+    async def upsert_on_enqueue(
+        self, item: WorkItem, work_id: str, *, conn: Any = None
+    ) -> dict[str, Any]: ...
 
     async def set_state(
         self,
@@ -69,6 +80,7 @@ class ControlPlaneStore(Protocol):
         state: str,
         step: Optional[str] = None,
         last_error: Optional[dict[str, Any]] = None,
+        conn: Any = None,
     ) -> dict[str, Any]: ...
 
     async def link_child(
@@ -78,6 +90,7 @@ class ControlPlaneStore(Protocol):
         child_work_id: str,
         relation: str = "child",
         max_children: int = 50,
+        conn: Any = None,
     ) -> dict[str, Any]: ...
 
     async def get_meta(self, work_id: str) -> Optional[dict[str, Any]]: ...

@@ -13,7 +13,7 @@ from roost.runtime.backends.redis import (
     RedisSnapshotStore,
     RedisWorkItemStore,
 )
-from roost.runtime.models import WorkItem
+from roost.runtime.models import Snapshot, WorkItem
 from roost.runtime.registry import EngineRegistry
 from roost.runtime.stores import (
     ControlPlaneStore,
@@ -23,7 +23,7 @@ from roost.runtime.stores import (
     SnapshotStore,
     WorkItemStore,
 )
-from roost.runtime.swarm import RedisSwarm, _RedisSwarmRuntime
+from roost.runtime.swarm import RedisSwarm, SwarmConfig, _RedisSwarmRuntime
 from roost.runtime.workspaces import WorkspaceManager, WorkspaceSpec
 
 
@@ -97,3 +97,52 @@ async def test_runtime_skips_operator_cancelled_work_before_lease():
     )
 
     assert result == {"status": "cancelled", "reason": "operator_cancelled", "job_id": None}
+
+
+async def test_redis_store_methods_accept_conn_none():
+    """Simple-mode stores must ignore conn= so the shared step txn call sites work."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    redis = MagicMock()
+    redis.get = AsyncMock(return_value=None)
+    redis.set = AsyncMock(return_value=True)
+    redis.register_script = MagicMock(return_value=AsyncMock(return_value=1))
+    redis.xadd = AsyncMock()
+    pipe = MagicMock()
+    pipe.set = MagicMock(return_value=pipe)
+    pipe.zadd = MagicMock(return_value=pipe)
+    pipe.zrem = MagicMock(return_value=pipe)
+    pipe.execute = AsyncMock(return_value=[])
+    redis.pipeline = MagicMock(return_value=pipe)
+
+    snapshots = RedisSnapshotStore(redis)
+    snap = Snapshot(work_id="w1", engine="dummy", version=1)
+    assert await snapshots.save(snap, expected_version=0, conn=None) is True
+    assert await snapshots.load("w1", conn=None) is None
+
+    control = RedisControlPlane(redis)
+    item = WorkItem(work_id="w1", engine="dummy")
+    await control.set_state(work_id="w1", engine="dummy", state="queued", conn=None)
+    await control.upsert_on_enqueue(item, "w1", conn=None)
+    await control.link_child(parent_work_id="w1", child_work_id="c1", conn=None)
+
+    work_items = RedisWorkItemStore(redis)
+    claimed = await work_items.get_or_claim_work_id(item, conn=None)
+    assert claimed == "w1"
+
+
+def test_production_init_does_not_bind_redis_memory_stores():
+    runtime = RedisSwarm(
+        _DummyEngine(),
+        config=SwarmConfig(
+            redis_url="redis://127.0.0.1:9/0",
+            runtime_mode="production",
+            postgres_url="postgresql://roost:roost@127.0.0.1:9/roost",
+        ),
+    )
+    assert runtime.stores is None
+    assert runtime.leases is None
+    assert runtime.snapshots is None
+    assert runtime.control is None
+    assert runtime.work_items is None
+    assert isinstance(runtime.inflight, RedisInflightStore)
