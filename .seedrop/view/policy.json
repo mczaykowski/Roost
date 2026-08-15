@@ -74,13 +74,16 @@
       "purpose": "Local console: aiohttp server on :8766 for inspecting work, events, DLQ."
     },
     "tests/": {
-      "purpose": "pytest-asyncio suite; test_runtime_primitives.py is the orientation test. Note: 507 lines, zero concurrency/transaction tests — see knowledge/audit.md."
+      "purpose": "pytest-asyncio suite; test_runtime_primitives.py is orientation. Postgres concurrency/transaction/recovery/lock tests are gated on ROOST_TEST_POSTGRES_URL."
     },
     ".seedrop/view/knowledge/audit.md": {
-      "purpose": "Line-verified maturity audit: what Roost guarantees today vs. what its docs claim. Read BEFORE any production-mode correctness work. Defines the P0/P1/P2 finding set the tasks are built from."
+      "purpose": "Line-verified maturity audit: what Roost guarantees today vs. what its docs claim. Defines the P0/P1/P2 finding set (deploy gate, PR #13)."
+    },
+    ".seedrop/view/knowledge/ops-drill.md": {
+      "purpose": "Crash + Redis-blip drill writeup. Source of truth for sprint OPS."
     },
     ".seedrop/view/tasks/": {
-      "purpose": "Actionable, deployable fixes keyed to audit.md findings. TASK-DEPLOY-GATE.md is the index and sequencing plan."
+      "purpose": "Actionable fixes. TASK-SPRINT-OPS.md is the current index; TASK-DEPLOY-GATE.md is landed."
     }
   }
 }

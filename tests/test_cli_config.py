@@ -47,6 +47,9 @@ concurrency = 2
 timeout_seconds = 30
 retries = 3
 lease_ttl_seconds = 15
+stale_after_seconds = 12
+recovery_interval_seconds = 1
+heartbeat_interval_seconds = 8
 workspace_root = ".roost/workspaces"
 workspace_mode = "clone"
 
@@ -69,6 +72,9 @@ root = ".roost/artifacts"
     assert args.timeout == 30
     assert args.retries == 3
     assert args.lease_ttl == 15
+    assert args.stale_after == 12
+    assert args.recovery_interval == 1
+    assert args.heartbeat_interval == 8
     assert args.workspace_mode == "clone"
     assert args.workspace_root == str(tmp_path / ".roost" / "workspaces")
     assert args.artifact_root == str(tmp_path / ".roost" / "artifacts")

@@ -1,7 +1,7 @@
 # P2-1 · Make resource locks actually atomic
 
 **Severity:** P2 (documented "best-effort," but positioned for multi-customer use)
-**Status:** open
+**Status:** landed (PR #13)
 **Blocked by:** —
 **Blocks:** —
 **Audit ref:** `.seedrop/view/knowledge/audit.md` §P2-1

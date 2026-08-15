@@ -81,7 +81,7 @@ Production mode optimizes for:
 Redis owns fast movement and coordination:
 
 - queues
-- delayed jobs
+- delayed jobs (`next_step_delay_seconds` is movement, not a new snapshot version)
 - leases
 - in-flight markers
 - resource locks

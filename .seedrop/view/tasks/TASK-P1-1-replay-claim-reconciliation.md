@@ -1,7 +1,7 @@
 # P1-1 · Reconcile the "replay" claim with the code
 
 **Severity:** P1 (trust shock on first read; cheap to fix)
-**Status:** open
+**Status:** landed (PR #13)
 **Blocked by:** —
 **Blocks:** —
 **Audit ref:** `.seedrop/view/knowledge/audit.md` §P1-1

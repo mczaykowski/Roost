@@ -95,8 +95,6 @@ POSTGRES_URL="${POSTGRES_URL}" uv run --extra postgres python - <<'PY'
 import asyncio
 import os
 
-import psycopg
-
 from roost.runtime.backends.postgres import (
     PostgresArtifactMetadataStore,
     PostgresControlPlaneStore,
@@ -105,19 +103,20 @@ from roost.runtime.backends.postgres import (
     PostgresSnapshotStore,
     PostgresWorkerHeartbeatStore,
     PostgresWorkItemStore,
+    open_postgres_pool,
 )
 from roost.runtime.models import Artifact, Snapshot, WorkItem
 
 
 async def main() -> None:
-    async with await psycopg.AsyncConnection.connect(os.environ["POSTGRES_URL"]) as conn:
-        items = PostgresWorkItemStore(conn)
-        snapshots = PostgresSnapshotStore(conn)
-        artifacts = PostgresArtifactMetadataStore(conn)
-        leases = PostgresLeaseStore(conn)
-        resources = PostgresResourceStore(conn)
-        workers = PostgresWorkerHeartbeatStore(conn)
-        control = PostgresControlPlaneStore(conn)
+    async with open_postgres_pool(os.environ["POSTGRES_URL"]) as pool:
+        items = PostgresWorkItemStore(pool)
+        snapshots = PostgresSnapshotStore(pool)
+        artifacts = PostgresArtifactMetadataStore(pool)
+        leases = PostgresLeaseStore(pool)
+        resources = PostgresResourceStore(pool)
+        workers = PostgresWorkerHeartbeatStore(pool)
+        control = PostgresControlPlaneStore(pool)
 
         item = WorkItem(
             work_id="postgres-e2e-1",

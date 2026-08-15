@@ -59,7 +59,14 @@ class Snapshot(BaseModel):
     artifacts: List[Artifact] = Field(default_factory=list)
 
     is_finished: bool = False
-    next_step_delay_seconds: float = 0.0
+    next_step_delay_seconds: float = Field(
+        default=0.0,
+        description=(
+            "Seconds until the next step should run. This is movement, not memory: "
+            "a wait-only step that only changes this field (and delay bookkeeping "
+            "in data) is re-enqueued without a new snapshot version."
+        ),
+    )
 
     created_at: float = Field(default_factory=time.time)
     updated_at: float = Field(default_factory=time.time)

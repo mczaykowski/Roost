@@ -30,3 +30,7 @@ def test_console_static_includes_recovery_actions():
     assert "/replay" in app
     assert "/ack" in app
     assert "detailActions" in index
+    assert "formatAge" in app
+    assert ">Age<" in index
+    assert "age_seconds" in app
+    assert "work_recovered" in app

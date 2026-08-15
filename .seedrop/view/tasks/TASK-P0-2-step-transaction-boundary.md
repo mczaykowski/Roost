@@ -1,7 +1,7 @@
 # P0-2 · One transaction per step
 
 **Severity:** P0 (durability claim is false without it)
-**Status:** open
+**Status:** landed (PR #13)
 **Blocked by:** P0-1 (cleanest after pooling lands, but can proceed with `commit=False` mode in parallel)
 **Blocks:** —
 **Audit ref:** `.seedrop/view/knowledge/audit.md` §P0-2

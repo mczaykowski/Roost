@@ -1,8 +1,8 @@
 # Deploy Gate — production-mode readiness
 
 **Severity:** tracking (this is the index, not a code task)
-**Status:** open
-**Blocks:** any production-mode deployment that trusts durability
+**Status:** landed (PR #13) — durability claims are true; operability is sprint OPS
+**Blocks:** — (superseded by `TASK-SPRINT-OPS.md` for operator-readiness)
 **Audit ref:** `.seedrop/view/knowledge/audit.md` §"Suggested deployment gate"
 
 ## Goal
@@ -18,12 +18,17 @@ Land the smallest set of changes that move Roost from "foundation" to a producti
 After 1–3 land **with their tests**, Roost can be deployed in production mode with a defensible correctness story. P2 items are improvements, not gates.
 
 ## Acceptance (the deploy gate)
-- [ ] P0-1, P0-2, P0-3 merged with passing tests.
-- [ ] New `tests/test_postgres_concurrency.py` exists and passes (renew ‖ save).
-- [ ] New crash-injection test passes (meta/snapshot agree after mid-step failure).
-- [ ] New Redis-flush test passes (recovery still finds work).
-- [ ] `uv run pytest` and `uv run ruff check .` green.
-- [ ] README re-read: no capability is stated that the code does not guarantee.
+- [x] P0-1, P0-2, P0-3 merged with passing tests. (PR #13)
+- [x] New `tests/test_postgres_concurrency.py` exists and passes (renew ‖ save).
+- [x] New crash-injection test passes (meta/snapshot agree after mid-step failure).
+      (`tests/test_postgres_transaction.py`)
+- [x] New Redis-flush test passes (recovery still finds work).
+      (`tests/test_postgres_recovery.py` + `scripts/ops_drill_crash_and_redis_blip.sh`)
+- [x] `uv run pytest` and `uv run ruff check .` green.
+- [x] README re-read: no capability is stated that the code does not guarantee.
+
+Next: `TASK-SPRINT-OPS.md` (logs, recovery knobs/events, wait-only saves, worker
+liveness, mid-step crash drill).
 
 ## Sequencing rationale
 P0-2 is cleanest after P0-1 (pooling makes the per-step transaction natural), but P0-2 can proceed in parallel using the existing `commit=False` flag. P0-3 is independent. The P1 batch is doc/migration work and should ride in the same release so the README never ships overclaiming against the new code.

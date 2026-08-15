@@ -1,7 +1,7 @@
 # P2-2 · Decide the fate of the trigger condition DSL
 
 **Severity:** P2 (smell; risk of accreting into load-bearing surface)
-**Status:** open
+**Status:** landed (PR #13)
 **Blocked by:** —
 **Blocks:** —
 **Audit ref:** `.seedrop/view/knowledge/audit.md` §P2-2

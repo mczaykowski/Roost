@@ -5,6 +5,7 @@ import asyncio
 import json
 import logging
 import os
+import sys
 import time
 import uuid
 from typing import Any, Optional
@@ -105,6 +106,19 @@ def _choose(*values: Any) -> Any:
     return None
 
 
+def configure_worker_logging(level: str = "info") -> None:
+    """Send worker logs to stderr. JSON step lines are INFO on roost.runtime."""
+    numeric = getattr(logging, str(level).upper(), None)
+    if not isinstance(numeric, int):
+        raise SystemExit(f"Invalid log level: {level}")
+    logging.basicConfig(
+        stream=sys.stderr,
+        level=numeric,
+        format="%(message)s",
+    )
+    logging.getLogger("roost.runtime").setLevel(numeric)
+
+
 def _apply_runtime_config(args: argparse.Namespace) -> argparse.Namespace:
     repo_path = getattr(args, "repo_path", ".")
     config_path, explicit = resolve_roost_config_path(
@@ -151,6 +165,25 @@ def _apply_runtime_config(args: argparse.Namespace) -> argparse.Namespace:
         args.retries = _choose(args.retries, config.worker.retries if config else None, 5)
     if hasattr(args, "lease_ttl"):
         args.lease_ttl = _choose(args.lease_ttl, config.worker.lease_ttl_seconds if config else None, 60)
+    if getattr(args, "cmd", None) == "worker":
+        if hasattr(args, "stale_after"):
+            args.stale_after = _choose(
+                args.stale_after,
+                config.worker.stale_after_seconds if config else None,
+                30,
+            )
+        if hasattr(args, "recovery_interval"):
+            args.recovery_interval = _choose(
+                args.recovery_interval,
+                config.worker.recovery_interval_seconds if config else None,
+                2.0,
+            )
+        if hasattr(args, "heartbeat_interval"):
+            args.heartbeat_interval = _choose(
+                args.heartbeat_interval,
+                config.worker.heartbeat_interval_seconds if config else None,
+                10.0,
+            )
     if hasattr(args, "workspace_root"):
         configured = resolve_config_relative_path(
             config.worker.workspace_root if config else None,
@@ -198,6 +231,10 @@ concurrency = {args.concurrency}
 timeout_seconds = {args.timeout}
 retries = {args.retries}
 lease_ttl_seconds = {args.lease_ttl}
+# stale_after_seconds is 30 so a slow worker is not treated as dead.
+stale_after_seconds = 30
+recovery_interval_seconds = 2
+heartbeat_interval_seconds = 10
 workspace_root = "{args.workspace_root}"
 workspace_mode = "{args.workspace_mode}"
 
@@ -290,6 +327,7 @@ def _cmd_enqueue(args: argparse.Namespace) -> None:
 def _cmd_worker(args: argparse.Namespace) -> None:
     _apply_runtime_config(args)
     _require_redis_deps()
+    configure_worker_logging(getattr(args, "log_level", "info"))
 
     from roost.runtime.swarm import RedisSwarm, RedisUniversalSwarm, SwarmConfig
 
@@ -329,6 +367,9 @@ def _cmd_worker(args: argparse.Namespace) -> None:
             runtime_mode=args.runtime_mode,
             postgres_url=args.postgres_url,
             lease_ttl_seconds=args.lease_ttl,
+            stale_after_seconds=float(args.stale_after),
+            recovery_interval_seconds=float(args.recovery_interval),
+            worker_heartbeat_interval_seconds=float(args.heartbeat_interval),
             job_timeout_seconds=args.timeout,
             job_retries=args.retries,
             roost_config=args.roost_config,
@@ -1155,6 +1196,30 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=int)
     p.add_argument("--retries", type=int)
     p.add_argument("--lease-ttl", type=int)
+    p.add_argument(
+        "--stale-after",
+        type=float,
+        help=(
+            "Seconds without progress before orphan recovery re-enqueues "
+            "(default 30). Exists so a slow worker is not treated as dead."
+        ),
+    )
+    p.add_argument(
+        "--recovery-interval",
+        type=float,
+        help="Seconds between orphan recovery scans (default 2).",
+    )
+    p.add_argument(
+        "--heartbeat-interval",
+        type=float,
+        help="Seconds between worker heartbeats (default 10).",
+    )
+    p.add_argument(
+        "--log-level",
+        choices=["debug", "info", "warning", "error"],
+        default="info",
+        help="Worker log level. JSON step lines emit at INFO on stderr.",
+    )
     p.add_argument("--workspace-root")
     p.add_argument("--workspace-mode", choices=["worktree", "clone"])
     p.add_argument("--artifact-root")
@@ -1224,7 +1289,16 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("workers", help="List worker heartbeats")
     _add_postgres_args(p)
     p.add_argument("--limit", type=int, default=100)
-    p.add_argument("--stale-after", type=int, default=30)
+    p.add_argument(
+        "--stale-after",
+        type=int,
+        default=30,
+        help=(
+            "Treat a worker as dead after this many seconds without a heartbeat. "
+            "Recommend >= 2 * heartbeat interval (default interval is 10s). "
+            "SIGKILL cannot write a goodbye; the row stays live until this window elapses."
+        ),
+    )
     p.set_defaults(fn=_cmd_workers)
 
     p = sub.add_parser("actions", help="List operator action records")
